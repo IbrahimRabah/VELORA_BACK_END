@@ -60,7 +60,8 @@ public class SecurityConfig {
             "/api/v1/brands/**",
             "/api/v1/variants/*/availability",
             "/api/v1/geo/**",
-            "/api/v1/ping"
+            "/api/v1/ping",
+            "/uploads/**"
     };
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;

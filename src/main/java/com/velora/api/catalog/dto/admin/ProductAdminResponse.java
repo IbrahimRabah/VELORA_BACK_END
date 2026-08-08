@@ -1,0 +1,36 @@
+package com.velora.api.catalog.dto.admin;
+
+import io.swagger.v3.oas.annotations.media.Schema;
+import java.math.BigDecimal;
+import java.time.OffsetDateTime;
+import java.util.List;
+
+/**
+ * The admin view — includes drafts, archived products and cost price, none of
+ * which ever appear in the public DTOs.
+ */
+@Schema(description = "Product as seen by staff")
+public record ProductAdminResponse(
+        Long id,
+        String slug,
+        String status,
+        String nameAr,
+        String nameEn,
+        Long categoryId,
+        String categoryName,
+        Long brandId,
+        String brandName,
+        boolean featured,
+        boolean newArrival,
+        int variantCount,
+        int imageCount,
+        BigDecimal minPrice,
+        BigDecimal maxPrice,
+        Integer availableQty,
+        OffsetDateTime publishedAt,
+        OffsetDateTime archivedAt,
+        OffsetDateTime createdAt,
+        OffsetDateTime updatedAt,
+        List<String> warnings
+) {
+}

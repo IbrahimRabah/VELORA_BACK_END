@@ -1,0 +1,361 @@
+package com.velora.api.catalog.service.admin;
+
+import com.velora.api.catalog.domain.Attribute;
+import com.velora.api.catalog.domain.Brand;
+import com.velora.api.catalog.domain.Category;
+import com.velora.api.catalog.domain.Product;
+import com.velora.api.catalog.domain.ProductAttributeValue;
+import com.velora.api.catalog.domain.ProductStatus;
+import com.velora.api.catalog.domain.ProductTranslation;
+import com.velora.api.catalog.dto.admin.ProductAdminResponse;
+import com.velora.api.catalog.dto.admin.ProductCreateRequest;
+import com.velora.api.catalog.dto.admin.ProductUpdateRequest;
+import com.velora.api.catalog.dto.admin.TranslationRequest;
+import com.velora.api.catalog.repository.AttributeRepository;
+import com.velora.api.catalog.repository.BrandRepository;
+import com.velora.api.catalog.repository.CategoryRepository;
+import com.velora.api.catalog.repository.ProductRepository;
+import com.velora.api.common.dto.PageResponse;
+import com.velora.api.common.exception.BusinessException;
+import com.velora.api.common.exception.ErrorCode;
+import com.velora.api.common.util.ArabicNormalizer;
+import com.velora.api.common.util.SlugGenerator;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+/**
+ * Product create, update, publish and archive.
+ *
+ * <p>Two things happen automatically here and must never be delegated to the client:
+ * <ul>
+ *   <li><b>slug generation</b> — unique, transliterated, and stable once published</li>
+ *   <li><b>search_text</b> — the Arabic-normalized copy used for searching. It is
+ *       derived with the SAME function the query uses. If a client could supply it,
+ *       the two would eventually diverge and search would silently stop matching.</li>
+ * </ul>
+ */
+@Service
+public class ProductAdminService {
+
+    private static final Logger log = LoggerFactory.getLogger(ProductAdminService.class);
+
+    private final ProductRepository productRepository;
+    private final CategoryRepository categoryRepository;
+    private final BrandRepository brandRepository;
+    private final AttributeRepository attributeRepository;
+
+    public ProductAdminService(ProductRepository productRepository,
+                               CategoryRepository categoryRepository,
+                               BrandRepository brandRepository,
+                               AttributeRepository attributeRepository) {
+        this.productRepository = productRepository;
+        this.categoryRepository = categoryRepository;
+        this.brandRepository = brandRepository;
+        this.attributeRepository = attributeRepository;
+    }
+
+    // -------------------------------------------------------------------- create
+
+    @Transactional
+    public ProductAdminResponse create(ProductCreateRequest request) {
+        Product product = new Product();
+        product.setCategory(loadCategory(request.categoryId()));
+        product.setBrand(loadBrand(request.brandId()));
+        product.setFeatured(request.featured());
+        product.setNewArrival(request.newArrival());
+        product.setStatus(ProductStatus.DRAFT);
+
+        String slug = resolveSlug(request.slug(), request.translations(), null);
+        product.setSlug(slug);
+
+        applyTranslations(product, request.translations());
+        applySpecifications(product, request.specifications());
+
+        Product saved = productRepository.save(product);
+        log.info("Created product id={} slug={}", saved.getId(), saved.getSlug());
+        return toResponse(saved);
+    }
+
+    // -------------------------------------------------------------------- update
+
+    @Transactional
+    public ProductAdminResponse update(Long id, ProductUpdateRequest request) {
+        Product product = load(id);
+
+        product.setCategory(loadCategory(request.categoryId()));
+        product.setBrand(loadBrand(request.brandId()));
+        product.setFeatured(request.featured());
+        product.setNewArrival(request.newArrival());
+
+        String requestedSlug = request.slug();
+        if (requestedSlug != null && !requestedSlug.equals(product.getSlug())) {
+            String newSlug = resolveSlug(requestedSlug, request.translations(), product.getId());
+            // TODO(SEO): write the old slug into url_redirect so existing links survive.
+            log.warn("Slug changed for product id={}: {} -> {}",
+                    id, product.getSlug(), newSlug);
+            product.setSlug(newSlug);
+        }
+
+        if (request.translations() != null && !request.translations().isEmpty()) {
+            product.getTranslations().clear();
+            applyTranslations(product, request.translations());
+        }
+        if (request.specifications() != null) {
+            product.getSpecifications().clear();
+            applySpecifications(product, request.specifications());
+        }
+
+        return toResponse(productRepository.save(product));
+    }
+
+    // ------------------------------------------------------------- status changes
+
+    /**
+     * A product cannot go live without at least one variant — it would render as a
+     * page with nothing to buy.
+     */
+    @Transactional
+    public ProductAdminResponse publish(Long id) {
+        Product product = load(id);
+
+        if (product.getVariants().isEmpty()) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED,
+                    "Add at least one variant before publishing");
+        }
+        if (product.getTranslations().get("ar") == null) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED,
+                    "An Arabic name is required before publishing");
+        }
+
+        product.setStatus(ProductStatus.ACTIVE);
+        if (product.getPublishedAt() == null) {
+            product.setPublishedAt(OffsetDateTime.now(ZoneOffset.UTC));
+        }
+        product.setArchivedAt(null);
+        return toResponse(productRepository.save(product));
+    }
+
+    @Transactional
+    public ProductAdminResponse unpublish(Long id) {
+        Product product = load(id);
+        product.setStatus(ProductStatus.DRAFT);
+        return toResponse(productRepository.save(product));
+    }
+
+    /**
+     * Archive, never delete. Order lines reference this product for reporting and
+     * reorder, so the row has to survive even when the product is off sale forever.
+     */
+    @Transactional
+    public ProductAdminResponse archive(Long id) {
+        Product product = load(id);
+        product.setStatus(ProductStatus.ARCHIVED);
+        product.setArchivedAt(OffsetDateTime.now(ZoneOffset.UTC));
+        log.info("Archived product id={}", id);
+        return toResponse(productRepository.save(product));
+    }
+
+    /** Copies everything except the SKUs and stock, which must be unique. */
+    @Transactional
+    public ProductAdminResponse duplicate(Long id) {
+        Product source = load(id);
+
+        Product copy = new Product();
+        copy.setCategory(source.getCategory());
+        copy.setBrand(source.getBrand());
+        copy.setFeatured(false);
+        copy.setNewArrival(false);
+        copy.setStatus(ProductStatus.DRAFT);
+        copy.setSlug(SlugGenerator.generateUnique(
+                source.getSlug() + "-copy", s -> !productRepository.existsBySlug(s)));
+
+        source.getTranslations().forEach((locale, t) -> {
+            ProductTranslation copied = new ProductTranslation();
+            ProductTranslation.Key key = new ProductTranslation.Key();
+            key.setLocale(locale);
+            copied.setKey(key);
+            copied.setName(t.getName() + " (copy)");
+            copied.setShortDescription(t.getShortDescription());
+            copied.setDescription(t.getDescription());
+            copied.setSearchText(buildSearchText(t.getName(), t.getShortDescription()));
+            copy.getTranslations().put(locale, copied);
+        });
+
+        Product saved = productRepository.save(copy);
+        log.info("Duplicated product id={} into id={}", id, saved.getId());
+        return toResponse(saved);
+    }
+
+    // --------------------------------------------------------------------- query
+
+    @Transactional(readOnly = true)
+    public PageResponse<ProductAdminResponse> list(Pageable pageable) {
+        Page<Product> page = productRepository.findAll(pageable);
+        return PageResponse.from(page, this::toResponse);
+    }
+
+    @Transactional(readOnly = true)
+    public ProductAdminResponse get(Long id) {
+        return toResponse(load(id));
+    }
+
+    // ------------------------------------------------------------------ internal
+
+    private void applyTranslations(Product product, List<TranslationRequest> translations) {
+        if (translations == null) {
+            return;
+        }
+        for (TranslationRequest request : translations) {
+            ProductTranslation translation = new ProductTranslation();
+            ProductTranslation.Key key = new ProductTranslation.Key();
+            key.setProductId(product.getId());
+            key.setLocale(request.locale());
+            translation.setKey(key);
+            translation.setName(request.name());
+            translation.setShortDescription(request.shortDescription());
+            translation.setDescription(request.description());
+            translation.setMetaTitle(request.metaTitle());
+            translation.setMetaDescription(request.metaDescription());
+
+            // Derived here, never accepted from the client.
+            translation.setSearchText(
+                    buildSearchText(request.name(), request.shortDescription()));
+
+            product.getTranslations().put(request.locale(), translation);
+        }
+    }
+
+    /**
+     * Normalizes with the SAME function {@code ProductSpecifications.matches()} uses
+     * on the incoming query. These two must never drift apart.
+     */
+    private String buildSearchText(String name, String shortDescription) {
+        String combined = name + " " + (shortDescription == null ? "" : shortDescription);
+        String normalized = ArabicNormalizer.normalize(combined);
+        if (normalized == null) {
+            return null;
+        }
+        return normalized.length() > 1000 ? normalized.substring(0, 1000) : normalized;
+    }
+
+    private void applySpecifications(Product product,
+                                     List<ProductCreateRequest.SpecificationRequest> specs) {
+        if (specs == null) {
+            return;
+        }
+        List<ProductAttributeValue> list = new ArrayList<>();
+        for (ProductCreateRequest.SpecificationRequest spec : specs) {
+            Attribute attribute = attributeRepository.findById(spec.attributeId())
+                    .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND,
+                            "Attribute not found: " + spec.attributeId()));
+
+            ProductAttributeValue pav = new ProductAttributeValue();
+            ProductAttributeValue.Key key = new ProductAttributeValue.Key();
+            key.setProductId(product.getId());
+            key.setAttributeId(attribute.getId());
+            pav.setKey(key);
+            pav.setProduct(product);
+            pav.setAttribute(attribute);
+            pav.setValueText(spec.valueText());
+            list.add(pav);
+        }
+        product.getSpecifications().addAll(list);
+    }
+
+    private String resolveSlug(String requested, List<TranslationRequest> translations,
+                               Long excludeProductId) {
+        String source = requested;
+        if (source == null || source.isBlank()) {
+            source = translations.stream()
+                    .filter(t -> "en".equals(t.locale()))
+                    .map(TranslationRequest::name)
+                    .findFirst()
+                    .orElseGet(() -> translations.get(0).name());
+        }
+
+        String slug = SlugGenerator.generateUnique(source, candidate -> {
+            if (excludeProductId == null) {
+                return !productRepository.existsBySlug(candidate);
+            }
+            return productRepository.findBySlugAndArchivedAtIsNull(candidate)
+                    .map(existing -> existing.getId().equals(excludeProductId))
+                    .orElse(true);
+        });
+
+        if (slug == null) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED,
+                    "Could not build a URL slug from the given name");
+        }
+        return slug;
+    }
+
+    private Product load(Long id) {
+        return productRepository.findById(id)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PRODUCT_NOT_FOUND));
+    }
+
+    private Category loadCategory(Long id) {
+        return categoryRepository.findById(id)
+                .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND,
+                        "Category not found: " + id));
+    }
+
+    private Brand loadBrand(Long id) {
+        if (id == null) {
+            return null;
+        }
+        return brandRepository.findById(id)
+                .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND,
+                        "Brand not found: " + id));
+    }
+
+    private ProductAdminResponse toResponse(Product product) {
+        List<String> warnings = new ArrayList<>();
+        if (product.getVariants().isEmpty()) {
+            warnings.add("No variants — this product cannot be published or bought");
+        }
+        if (product.getImages().isEmpty()) {
+            warnings.add("No images");
+        }
+        if (product.getTranslations().get("en") == null) {
+            warnings.add("No English translation — weakens SEO");
+        }
+        if (product.getStatus() == ProductStatus.ACTIVE && !product.isInStock()) {
+            warnings.add("Published but out of stock");
+        }
+
+        ProductTranslation ar = product.getTranslations().get("ar");
+        ProductTranslation en = product.getTranslations().get("en");
+
+        return new ProductAdminResponse(
+                product.getId(),
+                product.getSlug(),
+                product.getStatus().name(),
+                ar == null ? null : ar.getName(),
+                en == null ? null : en.getName(),
+                product.getCategory() == null ? null : product.getCategory().getId(),
+                product.getCategory() == null ? null : product.getCategory().nameFor("ar"),
+                product.getBrand() == null ? null : product.getBrand().getId(),
+                product.getBrand() == null ? null : product.getBrand().getNameAr(),
+                product.isFeatured(),
+                product.isNewArrival(),
+                product.getVariants().size(),
+                product.getImages().size(),
+                product.getMinPrice(),
+                product.getMaxPrice(),
+                product.getAvailableQty(),
+                product.getPublishedAt(),
+                product.getArchivedAt(),
+                product.getCreatedAt(),
+                product.getUpdatedAt(),
+                warnings);
+    }
+}

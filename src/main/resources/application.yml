@@ -2,6 +2,11 @@ spring:
   application:
     name: velora-api
 
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 10MB
+
   datasource:
     url: jdbc:sqlserver://localhost:1433;databaseName=velora;encrypt=true;trustServerCertificate=true
     username: sa
@@ -39,6 +44,10 @@ springdoc:
     path: /v3/api-docs
 
 velora:
+  storage:
+    local-path: D:/ibrahim_watches/velora-uploads
+    public-url-prefix: http://localhost:8080/uploads
+    max-file-size-bytes: 5242880
   jwt:
     secret: ${JWT_SECRET}
     access-token-minutes: 30

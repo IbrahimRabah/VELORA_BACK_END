@@ -39,3 +39,4 @@ application-local.yml
 application-*-local.yml
 *.pem
 *.key
+src/test/resources/application.yml
