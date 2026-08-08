@@ -1,5 +1,6 @@
 package com.velora.api.common.security;
 
+import com.velora.api.identity.security.JwtAuthenticationFilter;
 import java.util.Arrays;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
@@ -14,6 +15,7 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -34,9 +36,14 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 @EnableMethodSecurity
 public class SecurityConfig {
 
-    /** Paths reachable without any authentication. */
+    /** Reachable without authentication. */
     private static final String[] PUBLIC_PATHS = {
-            "/api/v1/auth/**",
+            "/api/v1/auth/register",
+            "/api/v1/auth/login",
+            "/api/v1/auth/refresh",
+            "/api/v1/auth/logout",
+            "/api/v1/auth/otp/**",
+            "/api/v1/auth/password/**",
             "/swagger-ui.html",
             "/swagger-ui/**",
             "/v3/api-docs",
@@ -56,8 +63,14 @@ public class SecurityConfig {
             "/api/v1/ping"
     };
 
+    private final JwtAuthenticationFilter jwtAuthenticationFilter;
+
     @Value("${velora.cors.allowed-origins}")
     private String allowedOrigins;
+
+    public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter) {
+        this.jwtAuthenticationFilter = jwtAuthenticationFilter;
+    }
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
@@ -75,10 +88,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/shipping/quote").permitAll()
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
-                // TODO(identity module): replace with
-                //   .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
-                // and delete httpBasic below.
-                .httpBasic(Customizer.withDefaults());
+                .addFilterBefore(jwtAuthenticationFilter,
+                        UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }
