@@ -2,6 +2,7 @@ package com.velora.api.catalog.repository;
 
 import com.velora.api.catalog.domain.Attribute;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -11,6 +12,18 @@ public interface AttributeRepository extends JpaRepository<Attribute, Long> {
 
     @EntityGraph(attributePaths = {"translations", "values", "values.translations"})
     List<Attribute> findByFilterableTrueOrderByDisplayOrderAsc();
+
+    Optional<Attribute> findByCode(String code);
+
+    /** Checked before insert so the user gets ATTRIBUTE_CODE_EXISTS, not a raw 500. */
+    boolean existsByCode(String code);
+
+    /** True when the attribute is already used to define at least one variant. */
+    @Query("""
+            select count(vav) > 0 from VariantAttributeValue vav
+            where vav.attribute.id = :attributeId
+            """)
+    boolean isUsedByVariants(@Param("attributeId") Long attributeId);
 
     /**
      * Filter facets for a category: only the attribute values that actually occur on

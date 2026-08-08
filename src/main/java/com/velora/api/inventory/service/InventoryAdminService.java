@@ -108,14 +108,13 @@ public class InventoryAdminService {
         int newOnHand = inventory.getQtyOnHand() + delta;
 
         if (newOnHand < 0) {
-            throw new BusinessException(ErrorCode.VALIDATION_FAILED,
-                    "Stock cannot go below zero. On hand: %d, requested change: %d"
+            throw new BusinessException(ErrorCode.NEGATIVE_STOCK,
+                    "On hand is %d, requested change is %d"
                             .formatted(inventory.getQtyOnHand(), delta));
         }
         if (newOnHand < inventory.getQtyReserved()) {
-            throw new BusinessException(ErrorCode.STOCK_UNAVAILABLE,
-                    ("%d unit(s) are reserved for orders in progress. "
-                            + "Stock cannot be reduced below that.")
+            throw new BusinessException(ErrorCode.STOCK_BELOW_RESERVED,
+                    "%d unit(s) are reserved for orders in progress"
                             .formatted(inventory.getQtyReserved()));
         }
 
@@ -150,7 +149,7 @@ public class InventoryAdminService {
             if (type == MovementType.SALE || type == MovementType.RETURN_SELLABLE
                     || type == MovementType.RETURN_DAMAGED
                     || type == MovementType.CANCELLATION_RESTOCK) {
-                throw new BusinessException(ErrorCode.VALIDATION_FAILED,
+                throw new BusinessException(ErrorCode.MOVEMENT_TYPE_NOT_MANUAL,
                         "%s is written by the order flow and cannot be set manually"
                                 .formatted(type));
             }
@@ -168,8 +167,7 @@ public class InventoryAdminService {
                     // inventory row — see VariantAdminService.createInventory.
                     variantRepository.findById(variantId).orElseThrow(
                             () -> new BusinessException(ErrorCode.VARIANT_NOT_FOUND));
-                    return new BusinessException(ErrorCode.RESOURCE_NOT_FOUND,
-                            "This variant has no inventory record");
+                    return new BusinessException(ErrorCode.INVENTORY_RECORD_MISSING);
                 });
     }
 

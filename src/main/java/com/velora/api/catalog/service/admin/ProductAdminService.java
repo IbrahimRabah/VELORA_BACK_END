@@ -127,12 +127,10 @@ public class ProductAdminService {
         Product product = load(id);
 
         if (product.getVariants().isEmpty()) {
-            throw new BusinessException(ErrorCode.VALIDATION_FAILED,
-                    "Add at least one variant before publishing");
+            throw new BusinessException(ErrorCode.PRODUCT_HAS_NO_VARIANTS);
         }
         if (product.getTranslations().get("ar") == null) {
-            throw new BusinessException(ErrorCode.VALIDATION_FAILED,
-                    "An Arabic name is required before publishing");
+            throw new BusinessException(ErrorCode.PRODUCT_MISSING_ARABIC_NAME);
         }
 
         product.setStatus(ProductStatus.ACTIVE);
@@ -252,7 +250,7 @@ public class ProductAdminService {
         List<ProductAttributeValue> list = new ArrayList<>();
         for (ProductCreateRequest.SpecificationRequest spec : specs) {
             Attribute attribute = attributeRepository.findById(spec.attributeId())
-                    .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND,
+                    .orElseThrow(() -> new BusinessException(ErrorCode.ATTRIBUTE_NOT_FOUND,
                             "Attribute not found: " + spec.attributeId()));
 
             ProductAttributeValue pav = new ProductAttributeValue();
@@ -290,7 +288,8 @@ public class ProductAdminService {
 
         if (slug == null) {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED,
-                    "Could not build a URL slug from the given name");
+                    "Could not build a URL slug from the given name. "
+                            + "Provide a 'slug' in Latin characters.");
         }
         return slug;
     }
@@ -302,7 +301,7 @@ public class ProductAdminService {
 
     private Category loadCategory(Long id) {
         return categoryRepository.findById(id)
-                .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND,
+                .orElseThrow(() -> new BusinessException(ErrorCode.CATEGORY_NOT_FOUND,
                         "Category not found: " + id));
     }
 
@@ -311,7 +310,7 @@ public class ProductAdminService {
             return null;
         }
         return brandRepository.findById(id)
-                .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND,
+                .orElseThrow(() -> new BusinessException(ErrorCode.BRAND_NOT_FOUND,
                         "Brand not found: " + id));
     }
 

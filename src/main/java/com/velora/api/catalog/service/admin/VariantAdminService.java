@@ -86,12 +86,12 @@ public class VariantAdminService {
 
         for (var selection : request.selections()) {
             Attribute attribute = attributeRepository.findById(selection.attributeId())
-                    .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND,
+                    .orElseThrow(() -> new BusinessException(ErrorCode.ATTRIBUTE_NOT_FOUND,
                             "Attribute not found: " + selection.attributeId()));
 
             if (!attribute.isVariantDefining()) {
-                throw new BusinessException(ErrorCode.VALIDATION_FAILED,
-                        "'%s' is an informational attribute and cannot generate variants"
+                throw new BusinessException(ErrorCode.ATTRIBUTE_NOT_VARIANT_DEFINING,
+                        "'%s' is informational (specification only) and cannot generate variants"
                                 .formatted(attribute.getCode()));
             }
 
@@ -159,11 +159,16 @@ public class VariantAdminService {
         if (variantRepository.existsBySku(sku)) {
             throw new BusinessException(ErrorCode.SKU_ALREADY_EXISTS, "SKU in use: " + sku);
         }
+        String barcode = blankToNull(item.barcode());
+        if (barcode != null && variantRepository.findByBarcode(barcode).isPresent()) {
+            throw new BusinessException(ErrorCode.BARCODE_ALREADY_EXISTS,
+                    "Barcode in use: " + barcode);
+        }
 
         ProductVariant variant = new ProductVariant();
         variant.setProduct(product);
         variant.setSku(sku.trim().toUpperCase());
-        variant.setBarcode(blankToNull(item.barcode()));
+        variant.setBarcode(barcode);
         variant.setPrice(item.price());
         variant.setCompareAtPrice(item.compareAtPrice());
         variant.setCostPrice(item.costPrice());
@@ -288,7 +293,7 @@ public class VariantAdminService {
                 .flatMap(a -> a.getValues().stream())
                 .filter(v -> v.getId().equals(valueId))
                 .findFirst()
-                .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND,
+                .orElseThrow(() -> new BusinessException(ErrorCode.ATTRIBUTE_VALUE_NOT_FOUND,
                         "Attribute value not found: " + valueId));
     }
 

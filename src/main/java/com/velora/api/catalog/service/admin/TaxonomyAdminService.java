@@ -61,8 +61,7 @@ public class TaxonomyAdminService {
     @Transactional
     public Long updateCategory(Long id, CategorySaveRequest request) {
         Category category = categoryRepository.findById(id)
-                .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND,
-                        "Category not found"));
+                .orElseThrow(() -> new BusinessException(ErrorCode.CATEGORY_NOT_FOUND));
         applyCategory(category, request, false);
         return categoryRepository.save(category).getId();
     }
@@ -70,12 +69,11 @@ public class TaxonomyAdminService {
     private void applyCategory(Category category, CategorySaveRequest request, boolean isNew) {
         if (request.parentId() != null) {
             Category parent = categoryRepository.findById(request.parentId())
-                    .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND,
+                    .orElseThrow(() -> new BusinessException(ErrorCode.CATEGORY_NOT_FOUND,
                             "Parent category not found"));
             // A category cannot be its own ancestor.
             if (category.getId() != null && parent.getId().equals(category.getId())) {
-                throw new BusinessException(ErrorCode.VALIDATION_FAILED,
-                        "A category cannot be its own parent");
+                throw new BusinessException(ErrorCode.CATEGORY_CYCLE);
             }
             category.setParent(parent);
         } else {
@@ -120,12 +118,25 @@ public class TaxonomyAdminService {
         Brand brand = id == null
                 ? new Brand()
                 : brandRepository.findById(id).orElseThrow(
-                        () -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "Brand not found"));
+                        () -> new BusinessException(ErrorCode.BRAND_NOT_FOUND));
 
         if (id == null || request.slug() != null) {
             String source = request.slug() != null && !request.slug().isBlank()
                     ? request.slug() : request.nameEn();
-            brand.setSlug(SlugGenerator.generate(source));
+            String slug = SlugGenerator.generate(source);
+            if (slug == null) {
+                throw new BusinessException(ErrorCode.VALIDATION_FAILED,
+                        "Could not build a URL slug from the given name");
+            }
+            // Checked here so the user sees BRAND_SLUG_EXISTS instead of a raw
+            // database constraint error.
+            boolean taken = brandRepository.existsBySlug(slug)
+                    && (id == null || !slug.equals(brand.getSlug()));
+            if (taken) {
+                throw new BusinessException(ErrorCode.BRAND_SLUG_EXISTS,
+                        "A brand already uses the slug '" + slug + "'");
+            }
+            brand.setSlug(slug);
         }
         brand.setNameAr(request.nameAr());
         brand.setNameEn(request.nameEn());
@@ -143,12 +154,24 @@ public class TaxonomyAdminService {
         Attribute attribute = id == null
                 ? new Attribute()
                 : attributeRepository.findById(id).orElseThrow(
-                        () -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND,
-                                "Attribute not found"));
+                        () -> new BusinessException(ErrorCode.ATTRIBUTE_NOT_FOUND));
+
+        // The most common admin mistake: trying to create COLOR again instead of
+        // adding a value to the existing one. Caught here with a message that says
+        // what to do, rather than surfacing a unique-index violation.
+        if (id == null && attributeRepository.existsByCode(request.code())) {
+            throw new BusinessException(ErrorCode.ATTRIBUTE_CODE_EXISTS,
+                    "Attribute '" + request.code() + "' already exists. "
+                            + "Use PUT /api/v1/admin/attributes/{id} to add values to it.");
+        }
+        if (id != null && !attribute.getCode().equals(request.code())
+                && attributeRepository.existsByCode(request.code())) {
+            throw new BusinessException(ErrorCode.ATTRIBUTE_CODE_EXISTS);
+        }
 
         // Flipping this after variants exist would orphan every SKU built from it.
         if (id != null && attribute.isVariantDefining() != request.variantDefining()) {
-            throw new BusinessException(ErrorCode.VALIDATION_FAILED,
+            throw new BusinessException(ErrorCode.ATTRIBUTE_IN_USE,
                     "variantDefining cannot be changed once the attribute is in use. "
                             + "Create a new attribute instead.");
         }
@@ -181,6 +204,16 @@ public class TaxonomyAdminService {
     }
 
     private void applyValues(Attribute attribute, AttributeSaveRequest request) {
+        // Two values with the same code in one payload would violate uq_av_code at
+        // flush time, long after the useful context is gone.
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (var valueRequest : request.values()) {
+            if (!seen.add(valueRequest.code())) {
+                throw new BusinessException(ErrorCode.ATTRIBUTE_VALUE_CODE_EXISTS,
+                        "Value code '" + valueRequest.code() + "' appears twice in the request");
+            }
+        }
+
         for (var valueRequest : request.values()) {
             AttributeValue value = attribute.getValues().stream()
                     .filter(v -> valueRequest.id() != null && valueRequest.id().equals(v.getId()))
