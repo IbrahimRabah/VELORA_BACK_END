@@ -102,10 +102,9 @@ public class TaxonomyAdminService {
         category.getTranslations().clear();
         for (TranslationRequest t : request.translations()) {
             CategoryTranslation translation = new CategoryTranslation();
-            CategoryTranslation.Key key = new CategoryTranslation.Key();
-            key.setCategoryId(category.getId());
-            key.setLocale(t.locale());
-            translation.setKey(key);
+            // @MapsId derives category_id from this association. Setting the id
+            // directly fails on create, because the category has no id yet.
+            translation.attachTo(category, t.locale());
             translation.setName(t.name());
             translation.setDescription(t.description());
             translation.setMetaTitle(t.metaTitle());
@@ -166,10 +165,7 @@ public class TaxonomyAdminService {
         attribute.getTranslations().clear();
         for (var t : request.translations()) {
             AttributeTranslation translation = new AttributeTranslation();
-            AttributeTranslation.Key key = new AttributeTranslation.Key();
-            key.setAttributeId(attribute.getId());
-            key.setLocale(t.locale());
-            translation.setKey(key);
+            translation.attachTo(attribute, t.locale());
             translation.setName(t.name());
             attribute.getTranslations().put(t.locale(), translation);
         }
@@ -205,10 +201,7 @@ public class TaxonomyAdminService {
             value.getTranslations().clear();
             for (var t : valueRequest.translations()) {
                 AttributeValueTranslation translation = new AttributeValueTranslation();
-                AttributeValueTranslation.Key key = new AttributeValueTranslation.Key();
-                key.setAttributeValueId(value.getId());
-                key.setLocale(t.locale());
-                translation.setKey(key);
+                translation.attachTo(value, t.locale());
                 translation.setName(t.name());
                 value.getTranslations().put(t.locale(), translation);
             }

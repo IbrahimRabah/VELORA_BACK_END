@@ -58,7 +58,7 @@ public class Category {
     private OffsetDateTime createdAt = OffsetDateTime.now(ZoneOffset.UTC);
 
     /** Keyed by locale ("ar", "en") so lookup is a map get, not a stream filter. */
-    @OneToMany(mappedBy = "key.categoryId", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OneToMany(mappedBy = "category", cascade = CascadeType.ALL, orphanRemoval = true)
     @MapKey(name = "key.locale")
     private Map<String, CategoryTranslation> translations = new LinkedHashMap<>();
 

@@ -28,7 +28,7 @@ import lombok.Setter;
 public class VariantAttributeValue {
 
     @EmbeddedId
-    private Key key;
+    private Key key = new Key();
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @MapsId("variantId")

@@ -29,7 +29,7 @@ import lombok.Setter;
 public class ProductAttributeValue {
 
     @EmbeddedId
-    private Key key;
+    private Key key = new Key();
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @MapsId("productId")

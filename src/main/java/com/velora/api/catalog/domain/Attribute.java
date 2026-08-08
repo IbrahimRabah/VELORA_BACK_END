@@ -58,7 +58,7 @@ public class Attribute {
     @Column(name = "display_order", nullable = false)
     private short displayOrder;
 
-    @OneToMany(mappedBy = "key.attributeId", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OneToMany(mappedBy = "attribute", cascade = CascadeType.ALL, orphanRemoval = true)
     @MapKey(name = "key.locale")
     private Map<String, AttributeTranslation> translations = new LinkedHashMap<>();
 

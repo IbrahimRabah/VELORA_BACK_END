@@ -74,7 +74,7 @@ public class Product extends BaseAuditEntity {
     @Column(name = "archived_at")
     private OffsetDateTime archivedAt;
 
-    @OneToMany(mappedBy = "key.productId", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true)
     @MapKey(name = "key.locale")
     private Map<String, ProductTranslation> translations = new LinkedHashMap<>();
 

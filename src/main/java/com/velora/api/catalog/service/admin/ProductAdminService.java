@@ -179,9 +179,7 @@ public class ProductAdminService {
 
         source.getTranslations().forEach((locale, t) -> {
             ProductTranslation copied = new ProductTranslation();
-            ProductTranslation.Key key = new ProductTranslation.Key();
-            key.setLocale(locale);
-            copied.setKey(key);
+            copied.attachTo(copy, locale);
             copied.setName(t.getName() + " (copy)");
             copied.setShortDescription(t.getShortDescription());
             copied.setDescription(t.getDescription());
@@ -215,10 +213,10 @@ public class ProductAdminService {
         }
         for (TranslationRequest request : translations) {
             ProductTranslation translation = new ProductTranslation();
-            ProductTranslation.Key key = new ProductTranslation.Key();
-            key.setProductId(product.getId());
-            key.setLocale(request.locale());
-            translation.setKey(key);
+            // attachTo sets the parent association; @MapsId derives product_id from it.
+            // Setting the id half of the key by hand does NOT work before the product
+            // is persisted — that is what caused the NULL constraint violation.
+            translation.attachTo(product, request.locale());
             translation.setName(request.name());
             translation.setShortDescription(request.shortDescription());
             translation.setDescription(request.description());
@@ -258,10 +256,10 @@ public class ProductAdminService {
                             "Attribute not found: " + spec.attributeId()));
 
             ProductAttributeValue pav = new ProductAttributeValue();
-            ProductAttributeValue.Key key = new ProductAttributeValue.Key();
-            key.setProductId(product.getId());
-            key.setAttributeId(attribute.getId());
-            pav.setKey(key);
+            // Same rule as the translations: @MapsId derives both halves of the
+            // composite key from these associations. Setting them by hand would put
+            // a null product id in the key on create.
+            pav.setKey(new ProductAttributeValue.Key());
             pav.setProduct(product);
             pav.setAttribute(attribute);
             pav.setValueText(spec.valueText());

@@ -9,6 +9,7 @@ import com.velora.api.catalog.domain.VariantStatus;
 import com.velora.api.common.util.ArabicNormalizer;
 import jakarta.persistence.criteria.Join;
 import jakarta.persistence.criteria.JoinType;
+import jakarta.persistence.criteria.Root;
 import jakarta.persistence.criteria.Subquery;
 import java.math.BigDecimal;
 import java.util.Collection;
@@ -21,23 +22,24 @@ import org.springframework.data.jpa.domain.Specification;
  * eight optional filters. As derived query methods that would be
  * {@code findByCategoryAndBrandInAndPriceBetweenAndStatus...} multiplied by every
  * combination — hundreds of methods, or hand-concatenated JPQL. Specifications
- * compose the same filters into one query at runtime, and a null filter simply
- * contributes nothing.
+ * compose the same filters into one query at runtime.
  *
- * <pre>
- * Specification&lt;Product&gt; spec = Specification
- *         .where(ProductSpecifications.isVisible())
- *         .and(ProductSpecifications.inCategory(filter.categoryId()))
- *         .and(ProductSpecifications.priceBetween(filter.minPrice(), filter.maxPrice()))
- *         .and(ProductSpecifications.hasAnyAttributeValue(filter.attributeValueIds()))
- *         .and(ProductSpecifications.inStock(filter.inStockOnly()))
- *         .and(ProductSpecifications.matches(filter.q(), locale));
- * </pre>
+ * <p>Note every inactive filter returns {@link #alwaysTrue()} rather than
+ * {@code null}: Spring Data JPA 4.x rejects a null argument to {@code and()}.
  */
 public final class ProductSpecifications {
 
     private ProductSpecifications() {
         // utility class
+    }
+
+    /**
+     * A no-op predicate. Spring Data JPA 4.x throws on {@code and(null)}, unlike
+     * earlier versions, so an inactive filter must contribute an always-true
+     * condition instead of nothing.
+     */
+    private static Specification<Product> alwaysTrue() {
+        return (root, query, cb) -> cb.conjunction();
     }
 
     /** Active and not archived. Apply to every public query. */
@@ -119,7 +121,7 @@ public final class ProductSpecifications {
         }
         return (root, query, cb) -> {
             Subquery<Long> sub = query.subquery(Long.class);
-            var variant = sub.from(ProductVariant.class);
+            Root<ProductVariant> variant = sub.from(ProductVariant.class);
             Join<ProductVariant, VariantAttributeValue> vav = variant.join("attributeValues");
 
             sub.select(variant.get("id"))
@@ -142,11 +144,20 @@ public final class ProductSpecifications {
     }
 
     /**
-     * Arabic-aware search.
+     * Arabic-aware search across EVERY translation, not just the current interface
+     * language.
+     *
+     * <p>This is deliberate. Restricting the search to the active locale means a
+     * customer browsing in English who types {@code ساعة ذهبية} finds nothing — and
+     * in this market that is a very common combination. What the shopper types and
+     * what language the buttons are in are two different things.
      *
      * <p>The query is normalized with the SAME function used when writing
-     * {@code search_text}. Without that, a customer typing {@code ساعه ذهبى} would
-     * not match a product stored as {@code ساعة ذهبي} — which is most customers.
+     * {@code search_text}, so {@code ساعه ذهبى} matches a product stored as
+     * {@code ساعة ذهبية}. Applying it on one side only would silently break search.
+     *
+     * <p>Uses EXISTS rather than a join: a product has two translation rows, and a
+     * join would return it twice, forcing DISTINCT and corrupting the page count.
      */
     public static Specification<Product> matches(String rawQuery, String locale) {
         String normalized = ArabicNormalizer.normalize(rawQuery);
@@ -156,21 +167,20 @@ public final class ProductSpecifications {
         String pattern = "%" + normalized.replace(" ", "%") + "%";
 
         return (root, query, cb) -> {
-            Join<Product, ProductTranslation> tr = root.join("translations", JoinType.LEFT);
-            return cb.and(
-                    cb.equal(tr.get("key").get("locale"), locale),
-                    cb.or(
-                            cb.like(cb.lower(tr.get("searchText")), pattern),
-                            cb.like(cb.lower(tr.get("name")), pattern),
-                            cb.like(cb.lower(root.get("slug")), pattern)));
+            Subquery<Long> sub = query.subquery(Long.class);
+            Root<ProductTranslation> tr = sub.from(ProductTranslation.class);
+
+            sub.select(cb.literal(1L))
+                    .where(cb.and(
+                            cb.equal(tr.get("product").get("id"), root.get("id")),
+                            cb.or(
+                                    cb.like(cb.lower(tr.get("searchText")), pattern),
+                                    cb.like(cb.lower(tr.get("name")), pattern))));
+
+            return cb.or(
+                    cb.exists(sub),
+                    // The slug is Latin, so a Latin query still matches it.
+                    cb.like(cb.lower(root.get("slug")), pattern));
         };
-    }
-    /**
-     * Spring Data JPA 4.x rejects a null argument to and(), unlike earlier versions.
-     * An inactive filter must therefore contribute an always-true predicate rather
-     * than null, so composition still works when nothing is filtered.
-     */
-    private static Specification<Product> alwaysTrue() {
-        return (root, query, cb) -> cb.conjunction();
     }
 }

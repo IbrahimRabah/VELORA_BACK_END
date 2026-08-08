@@ -43,7 +43,7 @@ public class AttributeValue {
     @Column(name = "display_order", nullable = false)
     private short displayOrder;
 
-    @OneToMany(mappedBy = "key.attributeValueId", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OneToMany(mappedBy = "attributeValue", cascade = CascadeType.ALL, orphanRemoval = true)
     @MapKey(name = "key.locale")
     private Map<String, AttributeValueTranslation> translations = new LinkedHashMap<>();
 

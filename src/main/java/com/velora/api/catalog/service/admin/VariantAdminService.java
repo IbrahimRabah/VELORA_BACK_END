@@ -274,9 +274,8 @@ public class VariantAdminService {
             AttributeValue value = findAttributeValue(valueId);
 
             VariantAttributeValue vav = new VariantAttributeValue();
-            VariantAttributeValue.Key key = new VariantAttributeValue.Key();
-            key.setAttributeId(value.getAttribute().getId());
-            vav.setKey(key);
+            // @MapsId fills both halves of the key from the associations below.
+            vav.setKey(new VariantAttributeValue.Key());
             vav.setVariant(variant);
             vav.setAttribute(value.getAttribute());
             vav.setAttributeValue(value);

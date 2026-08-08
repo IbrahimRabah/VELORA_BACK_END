@@ -4,6 +4,10 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Embeddable;
 import jakarta.persistence.EmbeddedId;
 import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.MapsId;
 import jakarta.persistence.Table;
 import java.io.Serial;
 import java.io.Serializable;
@@ -20,7 +24,12 @@ import lombok.Setter;
 public class ProductTranslation {
 
     @EmbeddedId
-    private Key key;
+    private Key key = new Key();
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @MapsId("productId")
+    @JoinColumn(name = "product_id", nullable = false)
+    private Product product;
 
     @Column(name = "name", nullable = false, length = 255)
     private String name;
@@ -38,12 +47,17 @@ public class ProductTranslation {
     private String metaDescription;
 
     /**
-     * Arabic-normalized copy used ONLY for searching.
-     * Always write it through {@code ArabicNormalizer.normalize()} — and normalize
-     * the incoming query with the same function, or search stops matching.
+     * Arabic-normalized copy used ONLY for searching. Always written through
+     * {@code ArabicNormalizer.normalize()} — and the query is normalized with the
+     * same function, or search silently stops matching.
      */
     @Column(name = "search_text", length = 1000)
     private String searchText;
+
+    public void attachTo(Product parent, String locale) {
+        this.product = parent;
+        this.key.setLocale(locale);
+    }
 
     @Embeddable
     @Getter
@@ -55,6 +69,7 @@ public class ProductTranslation {
         @Serial
         private static final long serialVersionUID = 1L;
 
+        /** Populated by @MapsId — do not set it by hand. */
         @Column(name = "product_id")
         private Long productId;
 
