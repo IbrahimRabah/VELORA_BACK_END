@@ -18,6 +18,9 @@ import com.velora.api.catalog.repository.CategoryRepository;
 import com.velora.api.common.exception.BusinessException;
 import com.velora.api.common.exception.ErrorCode;
 import com.velora.api.common.util.SlugGenerator;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -97,18 +100,7 @@ public class TaxonomyAdminService {
             category.setActive(request.active());
         }
 
-        category.getTranslations().clear();
-        for (TranslationRequest t : request.translations()) {
-            CategoryTranslation translation = new CategoryTranslation();
-            // @MapsId derives category_id from this association. Setting the id
-            // directly fails on create, because the category has no id yet.
-            translation.attachTo(category, t.locale());
-            translation.setName(t.name());
-            translation.setDescription(t.description());
-            translation.setMetaTitle(t.metaTitle());
-            translation.setMetaDescription(t.metaDescription());
-            category.getTranslations().put(t.locale(), translation);
-        }
+        mergeCategoryTranslations(category, request.translations());
     }
 
     // -------------------------------------------------------------------- brand
@@ -185,13 +177,7 @@ public class TaxonomyAdminService {
             attribute.setDisplayOrder(request.displayOrder().shortValue());
         }
 
-        attribute.getTranslations().clear();
-        for (var t : request.translations()) {
-            AttributeTranslation translation = new AttributeTranslation();
-            translation.attachTo(attribute, t.locale());
-            translation.setName(t.name());
-            attribute.getTranslations().put(t.locale(), translation);
-        }
+        mergeAttributeTranslations(attribute, request.translations());
 
         if (request.values() != null) {
             applyValues(attribute, request);
@@ -231,13 +217,83 @@ public class TaxonomyAdminService {
                 value.setDisplayOrder(valueRequest.displayOrder().shortValue());
             }
 
-            value.getTranslations().clear();
-            for (var t : valueRequest.translations()) {
-                AttributeValueTranslation translation = new AttributeValueTranslation();
+            mergeValueTranslations(value, valueRequest.translations());
+        }
+    }
+
+    // ---------------------------------------------------------------- merging
+
+    /*
+     * Translations are merged IN PLACE, never cleared and rebuilt.
+     *
+     * Calling clear() and re-adding the same locale looks equivalent, but Hibernate
+     * schedules the INSERT of the new row before the DELETE of the old one inside a
+     * single flush. Both carry the same composite primary key, so the insert hits a
+     * constraint violation — which surfaces as a confusing 409 on what looks like a
+     * simple edit.
+     *
+     * Updating the existing row and removing only the locales that genuinely
+     * disappeared avoids the collision entirely.
+     */
+
+    private void mergeCategoryTranslations(Category category,
+                                           List<TranslationRequest> requests) {
+        Set<String> incoming = requests.stream()
+                .map(TranslationRequest::locale)
+                .collect(Collectors.toSet());
+
+        // Only drop locales the caller actually removed.
+        category.getTranslations().keySet().removeIf(locale -> !incoming.contains(locale));
+
+        for (TranslationRequest t : requests) {
+            CategoryTranslation translation = category.getTranslations().get(t.locale());
+            if (translation == null) {
+                translation = new CategoryTranslation();
+                translation.attachTo(category, t.locale());
+                category.getTranslations().put(t.locale(), translation);
+            }
+            translation.setName(t.name());
+            translation.setDescription(t.description());
+            translation.setMetaTitle(t.metaTitle());
+            translation.setMetaDescription(t.metaDescription());
+        }
+    }
+
+    private void mergeAttributeTranslations(Attribute attribute,
+                                            List<AttributeSaveRequest.NameTranslation> requests) {
+        Set<String> incoming = requests.stream()
+                .map(AttributeSaveRequest.NameTranslation::locale)
+                .collect(Collectors.toSet());
+
+        attribute.getTranslations().keySet().removeIf(locale -> !incoming.contains(locale));
+
+        for (var t : requests) {
+            AttributeTranslation translation = attribute.getTranslations().get(t.locale());
+            if (translation == null) {
+                translation = new AttributeTranslation();
+                translation.attachTo(attribute, t.locale());
+                attribute.getTranslations().put(t.locale(), translation);
+            }
+            translation.setName(t.name());
+        }
+    }
+
+    private void mergeValueTranslations(AttributeValue value,
+                                        List<AttributeSaveRequest.NameTranslation> requests) {
+        Set<String> incoming = requests.stream()
+                .map(AttributeSaveRequest.NameTranslation::locale)
+                .collect(Collectors.toSet());
+
+        value.getTranslations().keySet().removeIf(locale -> !incoming.contains(locale));
+
+        for (var t : requests) {
+            AttributeValueTranslation translation = value.getTranslations().get(t.locale());
+            if (translation == null) {
+                translation = new AttributeValueTranslation();
                 translation.attachTo(value, t.locale());
-                translation.setName(t.name());
                 value.getTranslations().put(t.locale(), translation);
             }
+            translation.setName(t.name());
         }
     }
 }

@@ -24,6 +24,8 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -105,10 +107,12 @@ public class ProductAdminService {
         }
 
         if (request.translations() != null && !request.translations().isEmpty()) {
-            product.getTranslations().clear();
             applyTranslations(product, request.translations());
         }
         if (request.specifications() != null) {
+            // Specifications have no natural key collision risk: the composite key is
+            // (product_id, attribute_id) and the whole set is replaced, so clearing is
+            // safe here in a way it is not for translations.
             product.getSpecifications().clear();
             applySpecifications(product, request.specifications());
         }
@@ -209,23 +213,40 @@ public class ProductAdminService {
         if (translations == null) {
             return;
         }
+        /*
+         * Merged IN PLACE, never cleared and rebuilt.
+         *
+         * Clearing and re-adding the same locale makes Hibernate schedule the INSERT
+         * before the DELETE within one flush. Both rows share the composite primary
+         * key, so the insert violates it — and the failure surfaces as a baffling 409
+         * on an ordinary edit.
+         */
+        Set<String> incoming = translations.stream()
+                .map(TranslationRequest::locale)
+                .collect(Collectors.toSet());
+        product.getTranslations().keySet().removeIf(locale -> !incoming.contains(locale));
+
         for (TranslationRequest request : translations) {
-            ProductTranslation translation = new ProductTranslation();
-            // attachTo sets the parent association; @MapsId derives product_id from it.
-            // Setting the id half of the key by hand does NOT work before the product
-            // is persisted — that is what caused the NULL constraint violation.
-            translation.attachTo(product, request.locale());
+            ProductTranslation translation = product.getTranslations().get(request.locale());
+            if (translation == null) {
+                translation = new ProductTranslation();
+                // attachTo sets the parent association; @MapsId derives product_id from
+                // it. Setting the id half of the key by hand does not work before the
+                // product is persisted.
+                translation.attachTo(product, request.locale());
+                product.getTranslations().put(request.locale(), translation);
+            }
+
             translation.setName(request.name());
             translation.setShortDescription(request.shortDescription());
             translation.setDescription(request.description());
             translation.setMetaTitle(request.metaTitle());
             translation.setMetaDescription(request.metaDescription());
 
-            // Derived here, never accepted from the client.
+            // Derived here with the SAME normalizer the search query uses, and never
+            // accepted from the client — the two must not drift apart.
             translation.setSearchText(
                     buildSearchText(request.name(), request.shortDescription()));
-
-            product.getTranslations().put(request.locale(), translation);
         }
     }
 
