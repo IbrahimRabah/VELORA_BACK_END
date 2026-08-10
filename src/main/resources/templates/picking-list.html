@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8"/>
+    <title th:text="${view.title}">قائمة التحضير</title>
+    <style>
+        /*
+         * Everything is sized in mm because this document is printed, not scrolled.
+         * The @page rule is what openhtmltopdf uses for the sheet size and margins.
+         */
+        @page {
+            size: A4;
+            margin: 12mm 10mm 14mm 10mm;
+
+            @bottom-center {
+                content: "صفحة " counter(page) " من " counter(pages);
+                font-family: "Amiri", sans-serif;
+                font-size: 8pt;
+                color: #777;
+            }
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: "Amiri", sans-serif;
+            direction: rtl;
+            font-size: 10pt;
+            color: #1c1c28;
+            margin: 0;
+        }
+
+        .doc-header {
+            border-bottom: 2px solid #a8862c;
+            padding-bottom: 4mm;
+            margin-bottom: 5mm;
+        }
+        .brand {
+            font-size: 16pt;
+            font-weight: bold;
+            letter-spacing: 2px;
+        }
+        .doc-title { font-size: 12pt; margin-top: 1mm; }
+        .doc-meta { font-size: 8.5pt; color: #666; margin-top: 1.5mm; }
+
+        .summary {
+            width: 100%;
+            border: 1px solid #cfc9bc;
+            background: #f4f2ed;
+            padding: 3mm;
+            margin-bottom: 5mm;
+        }
+        .summary td {
+            font-size: 9.5pt;
+            padding: 0.5mm 3mm;
+        }
+        .summary .label { color: #666; }
+        .summary .value { font-weight: bold; }
+
+        /*
+         * page-break-inside: avoid keeps one order from being split across two
+         * sheets. A picker holding half an order is how items get missed.
+         */
+        .order {
+            border: 1px solid #cfc9bc;
+            margin-bottom: 4mm;
+            page-break-inside: avoid;
+        }
+
+        .order-head {
+            background: #e9e5dc;
+            padding: 2.5mm 3mm;
+            border-bottom: 1px solid #cfc9bc;
+        }
+        .order-number {
+            font-size: 11pt;
+            font-weight: bold;
+        }
+        .order-date { font-size: 8.5pt; color: #666; }
+
+        .customer {
+            padding: 2.5mm 3mm;
+            border-bottom: 1px solid #e9e5dc;
+            font-size: 9.5pt;
+            line-height: 1.6;
+        }
+        .customer .name { font-weight: bold; }
+        .customer .phone {
+            font-weight: bold;
+            /* Phone numbers are Latin digits inside Arabic text — isolate them so
+               bidirectional reordering does not scramble the order. */
+            direction: ltr;
+            unicode-bidi: isolate;
+            display: inline-block;
+        }
+        .customer .address { color: #333; }
+        .customer .landmark { color: #a8862c; }
+
+        .note {
+            padding: 2mm 3mm;
+            background: #fbf3e0;
+            border-bottom: 1px solid #e9e5dc;
+            font-size: 9pt;
+        }
+
+        table.lines {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        table.lines th {
+            background: #f4f2ed;
+            font-size: 8.5pt;
+            padding: 1.5mm 2mm;
+            border-bottom: 1px solid #cfc9bc;
+            text-align: right;
+        }
+        table.lines td {
+            font-size: 9.5pt;
+            padding: 2mm;
+            border-bottom: 1px solid #f0eee8;
+        }
+        table.lines tr:last-child td { border-bottom: none; }
+
+        .sku {
+            font-family: monospace;
+            font-size: 9pt;
+            direction: ltr;
+            unicode-bidi: isolate;
+            display: inline-block;
+        }
+        .qty {
+            text-align: center;
+            font-weight: bold;
+            font-size: 12pt;
+        }
+        /* A physical box the picker ticks. */
+        .tick {
+            width: 6mm;
+            text-align: center;
+        }
+        .tick span {
+            display: inline-block;
+            width: 4mm;
+            height: 4mm;
+            border: 1px solid #999;
+        }
+
+        .cod {
+            padding: 2.5mm 3mm;
+            background: #1c1c28;
+            color: #fff;
+            font-size: 11pt;
+            font-weight: bold;
+            text-align: center;
+        }
+        .cod .amount {
+            font-size: 13pt;
+            color: #d4af37;
+        }
+        .prepaid {
+            padding: 2mm 3mm;
+            background: #e9e5dc;
+            font-size: 9.5pt;
+            text-align: center;
+        }
+
+        .empty {
+            padding: 20mm;
+            text-align: center;
+            color: #888;
+        }
+    </style>
+</head>
+<body>
+
+<div class="doc-header">
+    <div class="brand">V E L O R A</div>
+    <div class="doc-title" th:text="${view.title}">قائمة التحضير والشحن</div>
+    <div class="doc-meta">
+        صدرت في: <span th:text="${view.generatedAt}">2026-08-09 03:00</span>
+    </div>
+</div>
+
+<table class="summary">
+    <tr>
+        <td class="label">عدد الطلبات</td>
+        <td class="value" th:text="${view.orderCount}">0</td>
+        <td class="label">إجمالي القطع</td>
+        <td class="value" th:text="${view.totalItems}">0</td>
+        <td class="label">المطلوب تحصيله</td>
+        <td class="value"
+            th:text="${#numbers.formatDecimal(view.totalCodAmount, 1, 'COMMA', 2, 'POINT')} + ' ج.م'">
+            0.00 ج.م
+        </td>
+    </tr>
+</table>
+
+<div th:if="${view.orderCount == 0}" class="empty">
+    لا توجد طلبات مطابقة للفلاتر المحددة
+</div>
+
+<div th:each="order : ${view.orders}" class="order">
+
+    <div class="order-head">
+        <span class="order-number" th:text="${order.orderNumber}">VLR-260809-0001</span>
+        <span class="order-date" th:text="' — ' + ${order.placedAt}"></span>
+    </div>
+
+    <div class="customer">
+        <div>
+            <span class="name" th:text="${order.customerName}">اسم العميل</span>
+            &nbsp;·&nbsp;
+            <span class="phone" th:text="${order.phone}">01012345678</span>
+            <span th:if="${order.altPhone != null}"
+                  th:text="' / ' + ${order.altPhone}" class="phone"></span>
+        </div>
+        <div class="address">
+            <span th:text="${order.governorate}">المحافظة</span> —
+            <span th:text="${order.address}">العنوان</span>
+        </div>
+        <div th:if="${order.landmark != null}" class="landmark"
+             th:text="'علامة مميزة: ' + ${order.landmark}"></div>
+    </div>
+
+    <div th:if="${order.note != null}" class="note"
+         th:text="'ملاحظة العميل: ' + ${order.note}"></div>
+
+    <table class="lines">
+        <thead>
+        <tr>
+            <th class="tick">✓</th>
+            <th style="width: 28%">الكود</th>
+            <th>المنتج</th>
+            <th style="width: 18%">الخيار</th>
+            <th style="width: 10%">الكمية</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr th:each="line : ${order.lines}">
+            <td class="tick"><span></span></td>
+            <td><span class="sku" th:text="${line.sku}">SKU</span></td>
+            <td th:text="${line.name}">اسم المنتج</td>
+            <td th:text="${line.variant != null ? line.variant : '—'}">—</td>
+            <td class="qty" th:text="${line.quantity}">1</td>
+        </tr>
+        </tbody>
+    </table>
+
+    <div th:if="${order.codAmount != null and order.codAmount.signum() > 0}" class="cod">
+        يُحصّل عند الاستلام:
+        <span class="amount"
+              th:text="${#numbers.formatDecimal(order.codAmount, 1, 'COMMA', 2, 'POINT')} + ' ج.م'">
+            0.00 ج.م
+        </span>
+    </div>
+    <div th:unless="${order.codAmount != null and order.codAmount.signum() > 0}" class="prepaid">
+        مدفوع مسبقاً — لا يُحصّل شيء
+    </div>
+
+</div>
+
+</body>
+</html>
