@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8"/>
+    <title th:text="'فاتورة ' + ${view.invoiceNumber}">فاتورة</title>
+    <style>
+        /*
+         * This document is printed and filed, so everything is in mm.
+         *
+         * Note: openhtmltopdf parses this as strict XML, including the text inside
+         * these CSS comments. Named HTML entities are undeclared in XML and fail the
+         * whole render, so use numeric character references instead.
+         */
+        @page {
+            size: A4;
+            margin: 14mm 12mm 16mm 12mm;
+
+            @bottom-center {
+                content: "صفحة " counter(page) " من " counter(pages);
+                font-family: "Amiri", sans-serif;
+                font-size: 8pt;
+                color: #888;
+            }
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: "Amiri", sans-serif;
+            direction: rtl;
+            font-size: 10pt;
+            color: #1c1c28;
+            margin: 0;
+        }
+
+        /* Latin digits inside Arabic text get reordered without isolation. */
+        .ltr {
+            direction: ltr;
+            unicode-bidi: isolate;
+            display: inline-block;
+        }
+
+        /* ------------------------------------------------------------ header */
+
+        .header {
+            border-bottom: 3px solid #a8862c;
+            padding-bottom: 5mm;
+            margin-bottom: 6mm;
+        }
+        .header-table { width: 100%; }
+        .header-table td { vertical-align: top; }
+
+        .brand {
+            font-size: 22pt;
+            font-weight: bold;
+            letter-spacing: 4px;
+            color: #1c1c28;
+        }
+        .seller-line {
+            font-size: 9pt;
+            color: #555;
+            line-height: 1.7;
+            margin-top: 2mm;
+        }
+
+        .doc-box { text-align: left; }
+        .doc-title {
+            font-size: 15pt;
+            font-weight: bold;
+            color: #a8862c;
+        }
+        .doc-meta {
+            font-size: 9.5pt;
+            color: #444;
+            line-height: 1.8;
+            margin-top: 2mm;
+        }
+        .doc-meta .label { color: #888; }
+
+        /* A voided invoice must be unmistakable at a glance. */
+        .cancelled-banner {
+            background: #8b1a1a;
+            color: #fff;
+            text-align: center;
+            padding: 3mm;
+            font-size: 13pt;
+            font-weight: bold;
+            letter-spacing: 3px;
+            margin-bottom: 5mm;
+        }
+
+        /* ------------------------------------------------------------- buyer */
+
+        .parties {
+            width: 100%;
+            margin-bottom: 6mm;
+        }
+        .parties td {
+            width: 50%;
+            vertical-align: top;
+            padding: 3mm;
+            border: 1px solid #ddd8cc;
+        }
+        .party-title {
+            font-size: 8.5pt;
+            color: #888;
+            margin-bottom: 1.5mm;
+        }
+        .party-name {
+            font-size: 11pt;
+            font-weight: bold;
+        }
+        .party-detail {
+            font-size: 9pt;
+            color: #444;
+            line-height: 1.7;
+        }
+
+        /* ------------------------------------------------------------- lines */
+
+        table.lines {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 5mm;
+        }
+        table.lines thead th {
+            background: #1c1c28;
+            color: #fff;
+            font-size: 8.5pt;
+            padding: 2mm 1.5mm;
+            text-align: center;
+            font-weight: normal;
+        }
+        table.lines thead th.right { text-align: right; }
+
+        table.lines td {
+            font-size: 9pt;
+            padding: 2mm 1.5mm;
+            border-bottom: 1px solid #eee;
+            text-align: center;
+        }
+        table.lines td.right { text-align: right; }
+        table.lines td.num {
+            text-align: left;
+            direction: ltr;
+            unicode-bidi: isolate;
+        }
+        table.lines tbody tr:nth-child(even) { background: #faf9f6; }
+
+        .product-name { font-weight: bold; }
+        .product-variant {
+            font-size: 8pt;
+            color: #777;
+        }
+        .sku {
+            font-family: monospace;
+            font-size: 8pt;
+            color: #777;
+            direction: ltr;
+            unicode-bidi: isolate;
+            display: inline-block;
+        }
+
+        /* ------------------------------------------------------------ totals */
+
+        .totals-wrap { width: 100%; }
+        .totals-wrap td { vertical-align: top; }
+
+        table.totals {
+            width: 75mm;
+            border-collapse: collapse;
+        }
+        table.totals td {
+            padding: 1.8mm 3mm;
+            font-size: 9.5pt;
+        }
+        table.totals td.label { color: #555; }
+        table.totals td.value {
+            text-align: left;
+            direction: ltr;
+            unicode-bidi: isolate;
+        }
+        table.totals tr.sep td { border-top: 1px solid #ddd8cc; }
+        table.totals tr.grand td {
+            background: #1c1c28;
+            color: #fff;
+            font-size: 12pt;
+            font-weight: bold;
+            padding: 3mm;
+        }
+        table.totals tr.grand td.value { color: #d4af37; }
+
+        .payment-note {
+            font-size: 9.5pt;
+            color: #444;
+            padding: 3mm;
+            background: #f4f2ed;
+            border-right: 3px solid #a8862c;
+        }
+
+        .footer {
+            margin-top: 8mm;
+            padding-top: 4mm;
+            border-top: 1px solid #ddd8cc;
+            font-size: 8.5pt;
+            color: #888;
+            text-align: center;
+            line-height: 1.8;
+        }
+    </style>
+</head>
+<body>
+
+<div th:if="${view.cancelled}" class="cancelled-banner">
+    فاتورة ملغاة
+</div>
+
+<div class="header">
+    <table class="header-table">
+        <tr>
+            <td>
+                <div class="brand">V E L O R A</div>
+                <div class="seller-line">
+                    <span th:text="${view.sellerName}">VELORA</span>
+                    <br th:if="${view.sellerAddress != null}"/>
+                    <span th:if="${view.sellerAddress != null}"
+                          th:text="${view.sellerAddress}"></span>
+                    <br th:if="${view.sellerPhone != null}"/>
+                    <span th:if="${view.sellerPhone != null}">
+                        هاتف: <span class="ltr" th:text="${view.sellerPhone}"></span>
+                    </span>
+                    <br th:if="${view.sellerEmail != null}"/>
+                    <span th:if="${view.sellerEmail != null}" class="ltr"
+                          th:text="${view.sellerEmail}"></span>
+                    <!-- Omitted entirely when unset. A wrong tax number on a legal
+                         document is worse than none. -->
+                    <br th:if="${view.sellerTaxNumber != null}"/>
+                    <span th:if="${view.sellerTaxNumber != null}">
+                        الرقم الضريبي: <span class="ltr" th:text="${view.sellerTaxNumber}"></span>
+                    </span>
+                    <br th:if="${view.sellerCommercialRegister != null}"/>
+                    <span th:if="${view.sellerCommercialRegister != null}">
+                        السجل التجاري:
+                        <span class="ltr" th:text="${view.sellerCommercialRegister}"></span>
+                    </span>
+                </div>
+            </td>
+            <td class="doc-box">
+                <div class="doc-title">فاتورة ضريبية</div>
+                <div class="doc-meta">
+                    <span class="label">رقم الفاتورة:</span>
+                    <span class="ltr" th:text="${view.invoiceNumber}">VLR-INV-2026-000001</span>
+                    <br/>
+                    <span class="label">التاريخ:</span>
+                    <span class="ltr" th:text="${view.issuedDate}">2026-08-10</span>
+                    <br/>
+                    <span class="label">رقم الطلب:</span>
+                    <span class="ltr" th:text="${view.orderNumber}">VLR-260810-0001</span>
+                </div>
+            </td>
+        </tr>
+    </table>
+</div>
+
+<table class="parties">
+    <tr>
+        <td>
+            <div class="party-title">فاتورة إلى</div>
+            <div class="party-name" th:text="${view.buyerName}">اسم العميل</div>
+            <div class="party-detail">
+                <span class="ltr" th:text="${view.buyerPhone}">01012345678</span>
+                <br/>
+                <span th:text="${view.buyerAddress}">العنوان</span>
+            </div>
+        </td>
+        <td>
+            <div class="party-title">تفاصيل الدفع</div>
+            <div class="party-name" th:text="${view.paymentMethod}">الدفع عند الاستلام</div>
+            <div class="party-detail">
+                تاريخ الطلب:
+                <span class="ltr" th:text="${view.orderDate}">2026-08-10</span>
+            </div>
+        </td>
+    </tr>
+</table>
+
+<table class="lines">
+    <thead>
+    <tr>
+        <th style="width: 6%">#</th>
+        <th class="right" style="width: 30%">الصنف</th>
+        <th style="width: 8%">الكمية</th>
+        <th style="width: 12%">سعر الوحدة</th>
+        <th style="width: 11%">الخصم</th>
+        <th style="width: 12%">الصافي</th>
+        <th style="width: 8%">الضريبة</th>
+        <th style="width: 13%">الإجمالي</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr th:each="line, stat : ${view.lines}">
+        <td th:text="${stat.count}">1</td>
+        <td class="right">
+            <div class="product-name" th:text="${line.name}">اسم المنتج</div>
+            <div class="product-variant" th:if="${line.variant != null}"
+                 th:text="${line.variant}"></div>
+            <span class="sku" th:text="${line.sku}">SKU</span>
+        </td>
+        <td th:text="${line.quantity}">1</td>
+        <td class="num"
+            th:text="${#numbers.formatDecimal(line.unitPriceGross, 1, 'COMMA', 2, 'POINT')}">
+            0.00
+        </td>
+        <td class="num"
+            th:text="${line.discount.signum() > 0}
+                     ? ${#numbers.formatDecimal(line.discount, 1, 'COMMA', 2, 'POINT')}
+                     : '—'">—</td>
+        <td class="num"
+            th:text="${#numbers.formatDecimal(line.netAmount, 1, 'COMMA', 2, 'POINT')}">
+            0.00
+        </td>
+        <td class="num"
+            th:text="${#numbers.formatDecimal(line.taxRatePercent, 1, 'COMMA', 0, 'POINT')} + '%'">
+            14%
+        </td>
+        <td class="num"
+            th:text="${#numbers.formatDecimal(line.grossAmount, 1, 'COMMA', 2, 'POINT')}">
+            0.00
+        </td>
+    </tr>
+    </tbody>
+</table>
+
+<table class="totals-wrap">
+    <tr>
+        <td>
+            <div class="payment-note">
+                جميع الأسعار شاملة ضريبة القيمة المضافة.
+                <br/>
+                المبلغ الظاهر في خانة الإجمالي هو المبلغ المستحق.
+            </div>
+        </td>
+        <td style="text-align: left">
+            <table class="totals">
+                <tr>
+                    <td class="label">إجمالي الأصناف</td>
+                    <td class="value"
+                        th:text="${#numbers.formatDecimal(view.subtotalGross, 1, 'COMMA', 2, 'POINT')}">
+                        0.00
+                    </td>
+                </tr>
+                <tr th:if="${view.discountTotal.signum() > 0}">
+                    <td class="label">الخصم</td>
+                    <td class="value"
+                        th:text="'-' + ${#numbers.formatDecimal(view.discountTotal, 1, 'COMMA', 2, 'POINT')}">
+                        0.00
+                    </td>
+                </tr>
+                <tr>
+                    <td class="label">الشحن</td>
+                    <td class="value"
+                        th:text="${#numbers.formatDecimal(view.shippingCost, 1, 'COMMA', 2, 'POINT')}">
+                        0.00
+                    </td>
+                </tr>
+                <tr class="sep">
+                    <td class="label">الصافي قبل الضريبة</td>
+                    <td class="value"
+                        th:text="${#numbers.formatDecimal(view.netTotal, 1, 'COMMA', 2, 'POINT')}">
+                        0.00
+                    </td>
+                </tr>
+                <tr>
+                    <td class="label">قيمة الضريبة</td>
+                    <td class="value"
+                        th:text="${#numbers.formatDecimal(view.taxTotal, 1, 'COMMA', 2, 'POINT')}">
+                        0.00
+                    </td>
+                </tr>
+                <tr class="grand">
+                    <td class="label">الإجمالي</td>
+                    <td class="value"
+                        th:text="${#numbers.formatDecimal(view.grandTotal, 1, 'COMMA', 2, 'POINT')}
+                                 + ' ' + ${view.currency}">
+                        0.00 EGP
+                    </td>
+                </tr>
+            </table>
+        </td>
+    </tr>
+</table>
+
+<div class="footer">
+    <span th:if="${view.footerNote != null}" th:text="${view.footerNote}"></span>
+    <br th:if="${view.footerNote != null}"/>
+    هذه الفاتورة صادرة إلكترونياً ولا تحتاج إلى توقيع.
+</div>
+
+</body>
+</html>

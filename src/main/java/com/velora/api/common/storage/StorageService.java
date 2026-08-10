@@ -21,6 +21,18 @@ public interface StorageService {
      */
     StoredFile store(MultipartFile file, String folder);
 
+    /**
+     * Stores bytes the application generated rather than a customer uploaded.
+     *
+     * <p>Separate from {@link #store} because generated files skip the upload
+     * validation entirely: a PDF this service just rendered does not need its type
+     * or size checked against what a browser is allowed to send.
+     *
+     * @param filename the exact name to use, e.g. {@code VLR-INV-2026-000001.pdf}
+     * @return the storage key
+     */
+    String storeBytes(byte[] content, String folder, String filename, String contentType);
+
     /** Silently does nothing if the key does not exist — delete is idempotent. */
     void delete(String key);
 

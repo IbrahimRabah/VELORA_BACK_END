@@ -5,6 +5,7 @@ import com.velora.api.common.exception.BusinessException;
 import com.velora.api.common.exception.ErrorCode;
 import com.velora.api.common.util.PhoneNormalizer;
 import com.velora.api.inventory.service.ReservationService;
+import com.velora.api.invoice.service.InvoiceService;
 import com.velora.api.order.domain.CustomerOrder;
 import com.velora.api.order.domain.FulfillmentStatus;
 import com.velora.api.order.domain.OrderItem;
@@ -42,15 +43,18 @@ public class OrderService {
     private final OrderStatusHistoryRepository historyRepository;
     private final OrderStatusMachine statusMachine;
     private final ReservationService reservationService;
+    private final InvoiceService invoiceService;
 
     public OrderService(OrderRepository orderRepository,
                         OrderStatusHistoryRepository historyRepository,
                         OrderStatusMachine statusMachine,
-                        ReservationService reservationService) {
+                        ReservationService reservationService,
+                        InvoiceService invoiceService) {
         this.orderRepository = orderRepository;
         this.historyRepository = historyRepository;
         this.statusMachine = statusMachine;
         this.reservationService = reservationService;
+        this.invoiceService = invoiceService;
     }
 
     // ------------------------------------------------------------- customer view
@@ -138,6 +142,25 @@ public class OrderService {
                 // Not yet shipped, or came straight back — return the units.
                     releaseIfStillHeld(order);
             default -> { }
+        }
+
+        // The order row must exist with its new status before the invoice snapshots
+        // it, so this flush comes before issuing.
+        orderRepository.saveAndFlush(order);
+
+        if (to == FulfillmentStatus.DELIVERED) {
+            /*
+             * Invoices are issued on DELIVERY, not on confirmation.
+             *
+             * With cash on delivery, refusal and failed delivery are common. An
+             * invoice raised for a sale that never happened needs a credit note to
+             * undo it — accounting complexity with no upside, and it would put gaps
+             * of meaning (though not of number) in the sequence.
+             *
+             * Inside the same transaction on purpose: if numbering fails, the
+             * delivery is not recorded either, and the two stay consistent.
+             */
+            invoiceService.issueForOrder(order.getId());
         }
 
         historyRepository.save(OrderStatusHistory.of(order, StatusKind.FULFILLMENT,

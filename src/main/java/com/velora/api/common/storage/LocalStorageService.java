@@ -73,6 +73,31 @@ public class LocalStorageService implements StorageService {
     }
 
     @Override
+    public String storeBytes(byte[] content, String folder, String filename,
+                             String contentType) {
+        LocalDate today = LocalDate.now();
+
+        // Generated documents keep their own name — an invoice PDF should be findable
+        // on disk by its invoice number, not by a random UUID.
+        String key = "%s/%d/%02d/%s".formatted(
+                sanitizeFolder(folder), today.getYear(), today.getMonthValue(),
+                sanitizeFilename(filename));
+
+        Path target = resolveSafely(key);
+
+        try {
+            Files.createDirectories(target.getParent());
+            Files.write(target, content);
+        } catch (IOException ex) {
+            log.error("Failed to store generated file {}", key, ex);
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "Could not save the file");
+        }
+
+        log.debug("Stored generated file {} ({} bytes)", key, content.length);
+        return key;
+    }
+
+    @Override
     public void delete(String key) {
         if (key == null || key.isBlank()) {
             return;
@@ -139,6 +164,13 @@ public class LocalStorageService implements StorageService {
             return "misc";
         }
         return folder.toLowerCase(Locale.ENGLISH).replaceAll("[^a-z0-9-]", "");
+    }
+
+    private String sanitizeFilename(String filename) {
+        if (filename == null || filename.isBlank()) {
+            return UUID.randomUUID().toString().replace("-", "");
+        }
+        return filename.replaceAll("[^A-Za-z0-9._-]", "-");
     }
 
     private String extensionOf(String filename, String contentType) {
