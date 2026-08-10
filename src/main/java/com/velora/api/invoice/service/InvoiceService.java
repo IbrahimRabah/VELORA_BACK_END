@@ -245,12 +245,14 @@ public class InvoiceService {
 
     // ------------------------------------------------------------------ internal
 
-    private byte[] renderPdf(Invoice invoice) {
+private byte[] renderPdf(Invoice invoice) {
         CustomerOrder order = orderRepository.findWithItemsById(invoice.getOrder().getId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.ORDER_NOT_FOUND));
 
         InvoiceView view = buildView(invoice, order);
         String html = templateRenderer.render("invoice", "view", view);
+
+
         return pdfRenderer.render(html);
     }
 
