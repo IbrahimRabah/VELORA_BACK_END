@@ -166,11 +166,22 @@ public class OrderService {
         historyRepository.save(OrderStatusHistory.of(order, StatusKind.FULFILLMENT,
                 from.name(), to.name(), note, actorId));
 
-        orderRepository.save(order);
         log.info("Order {} moved {} -> {}{}", order.getOrderNumber(), from, to,
                 note == null ? "" : " (" + note + ")");
 
-        return toResponse(order, locale);
+        /*
+         * Re-read before building the response.
+         *
+         * The stock operations above run native UPDATEs with clearAutomatically, which
+         * empties the persistence context so later reads see the new quantities. The
+         * side effect is that `order` and its items are now detached, and any lazy
+         * association they still hold can no longer be initialised.
+         *
+         * The session is still open, so a fresh fetch comes back fully managed. One
+         * extra query, and far more robust than trying to remember which associations
+         * were touched before the clear.
+         */
+        return toResponse(load(orderId), locale);
     }
 
     @Transactional
@@ -190,7 +201,7 @@ public class OrderService {
         orderRepository.save(order);
         log.info("Order {} payment {} -> {}", order.getOrderNumber(), from, to);
 
-        return toResponse(order, locale);
+        return toResponse(load(orderId), locale);
     }
 
     /** COD phone confirmation. Records who confirmed and when. */

@@ -23,12 +23,15 @@ public interface OrderRepository
 
     /**
      * Scoped by customer. Looking up by order number alone would let anyone read
-     * anyone's order by guessing — which is exactly why the number is not sequential.
+     * anyone's order by guessing — which is also why the number is not sequential.
+     *
+     * <p>The graph reaches through to the product because the response needs its slug
+     * to link back to the product page. Without it every line costs its own query.
      */
-    @EntityGraph(attributePaths = {"items"})
+    @EntityGraph(attributePaths = {"items", "items.product", "items.variant"})
     Optional<CustomerOrder> findByOrderNumberAndCustomerId(String orderNumber, Long customerId);
 
-    @EntityGraph(attributePaths = {"items"})
+    @EntityGraph(attributePaths = {"items", "items.product", "items.variant"})
     Optional<CustomerOrder> findWithItemsById(Long id);
 
     Page<CustomerOrder> findByCustomerIdOrderByPlacedAtDesc(Long customerId, Pageable pageable);
