@@ -94,7 +94,7 @@ public class CustomerAdminService {
                 user.isPhoneVerified(),
                 user.isEmailVerified(),
                 user.getStatus().name(),
-               null,
+                user.getPreferredLocale(),
                 user.getCreatedAt(),
                 user.getLastLoginAt(),
                 roles,

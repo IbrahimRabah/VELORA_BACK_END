@@ -250,12 +250,18 @@ public class DashboardQueries {
     // -------------------------------------------------------------- customers
 
     public DashboardResponse.CustomerStats customerStats(LocalDate from) {
-        Integer total = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM app_user WHERE deleted_at IS NULL", Integer.class);
+        // There is no deleted_at column: a removed account is a status, which keeps
+        // the row (and its order history) intact. Staff accounts are excluded because
+        // this is a CUSTOMER count.
+        Integer total = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM app_user
+                WHERE status <> 'DELETED' AND is_staff = 0
+                """, Integer.class);
 
-        Integer newCustomers = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM app_user WHERE created_at >= ? AND deleted_at IS NULL",
-                Integer.class, from.atStartOfDay());
+        Integer newCustomers = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM app_user
+                WHERE created_at >= ? AND status <> 'DELETED' AND is_staff = 0
+                """, Integer.class, from.atStartOfDay());
 
         // A guest order has no customer_id. Worth seeing: a high share means people
         // are buying without an account, and repeat purchases cannot be tracked.

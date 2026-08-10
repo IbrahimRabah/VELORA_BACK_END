@@ -46,7 +46,10 @@ public class CustomerQueries {
             default -> "u.created_at DESC";
         };
 
-        StringBuilder where = new StringBuilder(" WHERE u.deleted_at IS NULL ");
+        // No deleted_at column — a removed account is a status, so the row and its
+        // order history survive. Staff are excluded: this is the customer list.
+        StringBuilder where = new StringBuilder(
+                " WHERE u.status <> 'DELETED' AND u.is_staff = 0 ");
         List<Object> params = new ArrayList<>();
 
         if (search != null && !search.isBlank()) {
@@ -68,7 +71,7 @@ public class CustomerQueries {
         // customer row stays one row even before any order exists.
         String sql = """
                 SELECT u.id, u.first_name, u.last_name, u.phone_e164, u.email,
-                       u.is_phone_verified, u.status, u.created_at,
+                       u.phone_verified_at, u.status, u.created_at,
                        (SELECT COUNT(*) FROM customer_order o
                         WHERE o.customer_id = u.id
                           AND o.fulfillment_status <> 'CANCELLED') AS order_count,
@@ -94,7 +97,9 @@ public class CustomerQueries {
                         fullName(rs.getString("first_name"), rs.getString("last_name")),
                         PhoneNormalizer.toLocalFormat(rs.getString("phone_e164")),
                         rs.getString("email"),
-                        rs.getBoolean("is_phone_verified"),
+                        // Verification is stored as a timestamp, not a flag: knowing
+                        // WHEN a number was confirmed matters when a login is disputed.
+                        rs.getObject("phone_verified_at") != null,
                         rs.getInt("order_count"),
                         rs.getBigDecimal("total_spent"),
                         toOffset(rs.getObject("last_order_at")),
