@@ -209,7 +209,7 @@
     <div class="customer">
         <div>
             <span class="name" th:text="${order.customerName}">اسم العميل</span>
-            &nbsp;·&nbsp;
+            &#160;&#160;
             <span class="phone" th:text="${order.phone}">01012345678</span>
             <span th:if="${order.altPhone != null}"
                   th:text="' / ' + ${order.altPhone}" class="phone"></span>

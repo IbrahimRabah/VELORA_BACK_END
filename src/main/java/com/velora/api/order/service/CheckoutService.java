@@ -119,18 +119,33 @@ public class CheckoutService {
         // 3. Shipping. Throws before any stock is touched if we do not deliver there.
         ShippingRate rate = shippingService.requireRateFor(governorate.getId());
 
-        // 4. Reserve stock. FIRST write of the transaction, so a shortage costs
+        /*
+         * 4. Capture every value the order needs, BEFORE reserving.
+         *
+         * The reservation runs a native UPDATE with clearAutomatically = true, which
+         * empties the persistence context so later reads of inventory see the new
+         * numbers. The side effect is that every entity loaded so far — the cart, its
+         * variants, their products — becomes detached, and any collection not yet
+         * initialised can no longer be read.
+         *
+         * Reading the snapshot values first sidesteps that entirely, and it is closer
+         * to the intent anyway: an order is built from what the customer was shown,
+         * not from whatever the catalog says a moment later.
+         */
+        List<LineSnapshot> lines = captureLines(cart, locale);
+
+        // 5. Reserve stock. First write of the transaction, so a shortage costs
         //    nothing but a rolled-back read.
         Map<ProductVariant, Integer> quantities = new LinkedHashMap<>();
-        for (CartItem item : cart.getItems()) {
-            quantities.merge(item.getVariant(), item.getQuantity(), Integer::sum);
+        for (LineSnapshot line : lines) {
+            quantities.merge(line.variant(), line.quantity(), Integer::sum);
         }
         reservationService.reserveAll(quantities, cart.getId());
 
-        // 5. Money.
-        Totals totals = calculateTotals(cart, rate);
+        // 6. Money.
+        Totals totals = calculateTotals(lines, rate);
 
-        // 6. The order, with everything copied.
+        // 7. The order, with everything copied.
         CustomerOrder order = new CustomerOrder();
         order.setOrderNumber(orderNumberGenerator.generate());
         order.setCustomer(userId == null ? null : userRepository.findById(userId).orElse(null));
@@ -154,14 +169,14 @@ public class CheckoutService {
         order.setTaxTotal(totals.tax());
         order.setNetTotal(totals.net());
 
-        buildItems(order, cart, totals, locale);
+        buildItems(order, lines, totals);
 
         CustomerOrder saved = orderRepository.save(order);
 
         historyRepository.save(OrderStatusHistory.of(saved, StatusKind.FULFILLMENT,
                 null, FulfillmentStatus.PENDING.name(), "Order placed", userId));
 
-        // 7. Hand the holds to the order, and retire the cart.
+        // 8. Hand the holds to the order, and retire the cart.
         reservationService.attachToOrder(cart.getId(), saved.getId());
         cartService.markConverted(cart.getId());
 
@@ -180,19 +195,47 @@ public class CheckoutService {
     // ------------------------------------------------------------------- money
 
     /**
+     * Reads every value the order will freeze, while the entities are still attached.
+     *
+     * <p>Must run BEFORE the stock reservation — see the note in {@link #placeOrder}.
+     */
+    private List<LineSnapshot> captureLines(Cart cart, String locale) {
+        List<LineSnapshot> lines = new ArrayList<>();
+
+        for (CartItem item : cart.getItems()) {
+            ProductVariant variant = item.getVariant();
+            Product product = variant.getProduct();
+            ProductImage image = product.mainImage();
+
+            lines.add(new LineSnapshot(
+                    variant,
+                    product,
+                    nameFor(product, "ar"),
+                    nameFor(product, "en"),
+                    variant.getSku(),
+                    summaryFor(variant, locale),
+                    image == null ? null : image.getUrl(),
+                    variant.getPrice(),
+                    variant.getTaxRate(),
+                    variant.getWeightGrams(),
+                    item.getQuantity()));
+        }
+        return lines;
+    }
+
+    /**
      * All figures are TAX-INCLUSIVE, so tax is extracted rather than added.
      *
      * <p>Computed per line and then summed. Doing it on the order total instead
      * makes the invoice disagree with its own lines by a piastre or two — the kind
      * of thing an accountant notices immediately.
      */
-    private Totals calculateTotals(Cart cart, ShippingRate rate) {
+    private Totals calculateTotals(List<LineSnapshot> lines, ShippingRate rate) {
         BigDecimal subtotal = MoneyUtils.ZERO;
         List<BigDecimal> lineTotals = new ArrayList<>();
 
-        for (CartItem item : cart.getItems()) {
-            BigDecimal lineTotal = MoneyUtils.lineTotal(
-                    item.getVariant().getPrice(), item.getQuantity());
+        for (LineSnapshot line : lines) {
+            BigDecimal lineTotal = MoneyUtils.lineTotal(line.unitPrice(), line.quantity());
             lineTotals.add(lineTotal);
             subtotal = subtotal.add(lineTotal);
         }
@@ -207,8 +250,8 @@ public class CheckoutService {
         List<BigDecimal> allocations = MoneyUtils.allocate(discount, lineTotals);
 
         int weight = 0;
-        for (CartItem item : cart.getItems()) {
-            weight += item.getVariant().getWeightGrams() * item.getQuantity();
+        for (LineSnapshot line : lines) {
+            weight += line.weightGrams() * line.quantity();
         }
 
         ShippingCalculator.Calculation shipping = shippingCalculator.calculate(
@@ -216,10 +259,9 @@ public class CheckoutService {
 
         // Tax per line, on the discounted amount, then summed.
         BigDecimal tax = MoneyUtils.ZERO;
-        for (int i = 0; i < cart.getItems().size(); i++) {
-            CartItem item = cart.getItems().get(i);
+        for (int i = 0; i < lines.size(); i++) {
             BigDecimal taxableGross = lineTotals.get(i).subtract(allocations.get(i));
-            tax = tax.add(MoneyUtils.taxFromGross(taxableGross, item.getVariant().getTaxRate()));
+            tax = tax.add(MoneyUtils.taxFromGross(taxableGross, lines.get(i).taxRate()));
         }
 
         BigDecimal grandTotal = MoneyUtils.round(subtotal
@@ -235,38 +277,33 @@ public class CheckoutService {
                 grandTotal, MoneyUtils.round(tax), net, lineTotals, allocations);
     }
 
-    /** Copies every line. Nothing here may be resolved live afterwards. */
-    private void buildItems(CustomerOrder order, Cart cart, Totals totals, String locale) {
-        List<CartItem> cartItems = cart.getItems();
-
-        for (int i = 0; i < cartItems.size(); i++) {
-            CartItem cartItem = cartItems.get(i);
-            ProductVariant variant = cartItem.getVariant();
-            Product product = variant.getProduct();
+    /** Copies every line from the snapshot. Nothing here reads the catalog. */
+    private void buildItems(CustomerOrder order, List<LineSnapshot> lines, Totals totals) {
+        for (int i = 0; i < lines.size(); i++) {
+            LineSnapshot line = lines.get(i);
 
             BigDecimal lineTotal = totals.lineTotals().get(i);
             BigDecimal allocated = totals.allocations().get(i);
             BigDecimal taxableGross = lineTotal.subtract(allocated);
 
             OrderItem item = new OrderItem();
-            item.setVariant(variant);
-            item.setProduct(product);
+            // References, for reporting and reorder only.
+            item.setVariant(line.variant());
+            item.setProduct(line.product());
 
-            // ---- the snapshot ----
-            item.setProductNameAr(nameFor(product, "ar"));
-            item.setProductNameEn(nameFor(product, "en"));
-            item.setSku(variant.getSku());
-            item.setVariantSummary(summaryFor(variant, locale));
-            ProductImage image = product.mainImage();
-            item.setImageUrl(image == null ? null : image.getUrl());
-            item.setUnitPriceGross(variant.getPrice());
-            item.setQuantity(cartItem.getQuantity());
+            // ---- the snapshot: everything below is frozen ----
+            item.setProductNameAr(line.nameAr());
+            item.setProductNameEn(line.nameEn());
+            item.setSku(line.sku());
+            item.setVariantSummary(line.variantSummary());
+            item.setImageUrl(line.imageUrl());
+            item.setUnitPriceGross(line.unitPrice());
+            item.setQuantity(line.quantity());
             item.setLineDiscount(MoneyUtils.ZERO);
             item.setAllocatedCartDiscount(allocated);
-            item.setTaxRate(variant.getTaxRate());
+            item.setTaxRate(line.taxRate());
             item.setLineTotalGross(lineTotal);
-            item.setLineTaxAmount(
-                    MoneyUtils.taxFromGross(taxableGross, variant.getTaxRate()));
+            item.setLineTaxAmount(MoneyUtils.taxFromGross(taxableGross, line.taxRate()));
 
             order.addItem(item);
         }
@@ -368,6 +405,19 @@ public class CheckoutService {
                 .map(vav -> vav.getAttributeValue().nameFor(locale))
                 .reduce((a, b) -> a + " / " + b)
                 .orElse(null);
+    }
+
+    /**
+     * One cart line, read while its entities were still attached.
+     *
+     * <p>Holds the variant and product references the order needs as foreign keys,
+     * plus every value that gets frozen onto the order item.
+     */
+    private record LineSnapshot(
+            ProductVariant variant, Product product,
+            String nameAr, String nameEn, String sku, String variantSummary,
+            String imageUrl, BigDecimal unitPrice, BigDecimal taxRate,
+            int weightGrams, int quantity) {
     }
 
     /** The address, flattened, before anything is written. */

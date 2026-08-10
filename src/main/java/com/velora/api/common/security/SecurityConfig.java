@@ -87,6 +87,7 @@ public class SecurityConfig {
                         // Guest checkout: cart and order placement work without an account.
                         .requestMatchers("/api/v1/cart/**").permitAll()
                         .requestMatchers("/api/v1/shipping/quote").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/orders").permitAll()
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtAuthenticationFilter,
