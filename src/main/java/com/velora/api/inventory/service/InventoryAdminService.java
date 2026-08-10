@@ -1,5 +1,7 @@
 package com.velora.api.inventory.service;
 
+import com.velora.api.audit.domain.AuditAction;
+import com.velora.api.audit.service.AuditService;
 import com.velora.api.catalog.domain.ProductVariant;
 import com.velora.api.catalog.repository.ProductVariantRepository;
 import com.velora.api.common.dto.PageResponse;
@@ -41,13 +43,16 @@ public class InventoryAdminService {
     private final InventoryRepository inventoryRepository;
     private final StockMovementRepository movementRepository;
     private final ProductVariantRepository variantRepository;
+    private final AuditService auditService;
 
     public InventoryAdminService(InventoryRepository inventoryRepository,
                                  StockMovementRepository movementRepository,
-                                 ProductVariantRepository variantRepository) {
+                                 ProductVariantRepository variantRepository,
+                                 AuditService auditService) {
         this.inventoryRepository = inventoryRepository;
         this.movementRepository = movementRepository;
         this.variantRepository = variantRepository;
+        this.auditService = auditService;
     }
 
     /** Goods in from a supplier. */
@@ -135,6 +140,23 @@ public class InventoryAdminService {
 
         log.info("Stock {} for variant id={} by {} -> {} ({})",
                 type, variantId, delta, newOnHand, reason);
+
+        /*
+         * The movement ledger already records WHAT changed. The audit log records
+         * WHO — and those are different questions asked by different people. An
+         * accountant reconciling stock reads the ledger; an owner asking why six
+         * units vanished reads this.
+         */
+        auditService.record(
+                type == MovementType.PURCHASE_RECEIVED
+                        ? AuditAction.STOCK_RECEIVED : AuditAction.STOCK_ADJUSTED,
+                "INVENTORY",
+                variantId,
+                inventory.getVariant().getSku(),
+                inventory.getQtyOnHand() - delta,
+                newOnHand,
+                reason,
+                actorId);
 
         return toResponse(inventory);
     }

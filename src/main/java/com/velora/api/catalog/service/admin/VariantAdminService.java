@@ -1,5 +1,7 @@
 package com.velora.api.catalog.service.admin;
 
+import com.velora.api.audit.domain.AuditAction;
+import com.velora.api.audit.service.AuditService;
 import com.velora.api.catalog.domain.Attribute;
 import com.velora.api.catalog.domain.AttributeValue;
 import com.velora.api.catalog.domain.Product;
@@ -55,19 +57,22 @@ public class VariantAdminService {
     private final InventoryRepository inventoryRepository;
     private final StockMovementRepository movementRepository;
     private final VariantMatrixGenerator matrixGenerator;
+    private final AuditService auditService;
 
     public VariantAdminService(ProductRepository productRepository,
                                ProductVariantRepository variantRepository,
                                AttributeRepository attributeRepository,
                                InventoryRepository inventoryRepository,
                                StockMovementRepository movementRepository,
-                               VariantMatrixGenerator matrixGenerator) {
+                               VariantMatrixGenerator matrixGenerator,
+                               AuditService auditService) {
         this.productRepository = productRepository;
         this.variantRepository = variantRepository;
         this.attributeRepository = attributeRepository;
         this.inventoryRepository = inventoryRepository;
         this.movementRepository = movementRepository;
         this.matrixGenerator = matrixGenerator;
+        this.auditService = auditService;
     }
 
     // ------------------------------------------------------------ matrix preview
@@ -202,6 +207,8 @@ public class VariantAdminService {
             variant.setSku(item.sku().trim().toUpperCase());
         }
 
+        BigDecimal previousPrice = variant.getPrice();
+
         variant.setBarcode(blankToNull(item.barcode()));
         variant.setPrice(item.price());
         variant.setCompareAtPrice(item.compareAtPrice());
@@ -213,9 +220,22 @@ public class VariantAdminService {
             variant.setWeightGrams(item.weightGrams());
         }
 
-        // Price changes are audited: they affect what customers are charged.
         log.info("Updated variant id={} sku={} price={}",
                 variant.getId(), variant.getSku(), variant.getPrice());
+
+        /*
+         * Price is the most disputed field in any catalog. Six months from now
+         * someone will ask why this product costs what it does, and the only honest
+         * answer comes from a record of who changed it and when.
+         *
+         * Only recorded when the number actually moved — an audit log full of
+         * no-op entries is one nobody reads.
+         */
+        if (previousPrice != null && previousPrice.compareTo(variant.getPrice()) != 0) {
+            auditService.recordChange(AuditAction.PRICE_CHANGED, "PRODUCT_VARIANT",
+                    variant.getId(), variant.getSku(),
+                    previousPrice, variant.getPrice(), actorId);
+        }
 
         return toResponse(variantRepository.save(variant));
     }
