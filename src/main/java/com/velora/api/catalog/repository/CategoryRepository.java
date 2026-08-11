@@ -19,6 +19,10 @@ public interface CategoryRepository extends JpaRepository<Category, Long> {
     @EntityGraph(attributePaths = {"translations"})
     List<Category> findByActiveTrueOrderByDisplayOrderAscIdAsc();
 
+    /** Admin variant of the tree query: includes inactive categories too. */
+    @EntityGraph(attributePaths = {"translations"})
+    List<Category> findAllByOrderByDisplayOrderAscIdAsc();
+
     List<Category> findByParentIdAndActiveTrueOrderByDisplayOrderAsc(Long parentId);
 
     boolean existsBySlug(String slug);

@@ -8,17 +8,23 @@ import com.velora.api.catalog.domain.AttributeValueTranslation;
 import com.velora.api.catalog.domain.Brand;
 import com.velora.api.catalog.domain.Category;
 import com.velora.api.catalog.domain.CategoryTranslation;
+import com.velora.api.catalog.dto.BrandResponse;
+import com.velora.api.catalog.dto.CategoryTreeResponse;
+import com.velora.api.catalog.dto.admin.AttributeAdminResponse;
 import com.velora.api.catalog.dto.admin.AttributeSaveRequest;
 import com.velora.api.catalog.dto.admin.BrandSaveRequest;
 import com.velora.api.catalog.dto.admin.CategorySaveRequest;
 import com.velora.api.catalog.dto.admin.TranslationRequest;
+import com.velora.api.catalog.mapper.CatalogMapper;
 import com.velora.api.catalog.repository.AttributeRepository;
 import com.velora.api.catalog.repository.BrandRepository;
 import com.velora.api.catalog.repository.CategoryRepository;
 import com.velora.api.common.exception.BusinessException;
 import com.velora.api.common.exception.ErrorCode;
 import com.velora.api.common.util.SlugGenerator;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
@@ -41,13 +47,121 @@ public class TaxonomyAdminService {
     private final CategoryRepository categoryRepository;
     private final BrandRepository brandRepository;
     private final AttributeRepository attributeRepository;
+    private final CatalogMapper mapper;
 
     public TaxonomyAdminService(CategoryRepository categoryRepository,
                                 BrandRepository brandRepository,
-                                AttributeRepository attributeRepository) {
+                                AttributeRepository attributeRepository,
+                                CatalogMapper mapper) {
         this.categoryRepository = categoryRepository;
         this.brandRepository = brandRepository;
         this.attributeRepository = attributeRepository;
+        this.mapper = mapper;
+    }
+
+    // ------------------------------------------------------------------- reads
+
+    /**
+     * Every attribute, with its values and translations, ready for staff to build a
+     * variant matrix. Each attribute's {@code id} and each value's {@code id} can be
+     * sent straight to {@code POST /admin/products/{productId}/variants/preview} as
+     * {@code attributeId} / {@code valueIds} — no lookup step in between.
+     *
+     * <p>Unlike the storefront facet query, this returns every attribute regardless
+     * of {@code filterable}: specification-only attributes (movement, water
+     * resistance) never appear as a public filter but still need to be visible here.
+     */
+    @Transactional(readOnly = true)
+    public List<AttributeAdminResponse> listAttributes(Boolean variantDefining) {
+        List<Attribute> attributes = variantDefining == null
+                ? attributeRepository.findAllByOrderByDisplayOrderAsc()
+                : attributeRepository.findByVariantDefiningOrderByDisplayOrderAsc(variantDefining);
+        return attributes.stream().map(this::toAttributeAdminResponse).toList();
+    }
+
+    /**
+     * The full category tree, including inactive categories — staff need to find
+     * what they turned off in order to turn it back on.
+     */
+    @Transactional(readOnly = true)
+    public List<CategoryTreeResponse> getCategoryTree(String locale) {
+        List<Category> all = categoryRepository.findAllByOrderByDisplayOrderAscIdAsc();
+
+        Map<Long, List<Category>> byParent = all.stream()
+                .filter(c -> c.getParent() != null)
+                .collect(Collectors.groupingBy(c -> c.getParent().getId()));
+
+        return all.stream()
+                .filter(c -> c.getParent() == null)
+                .sorted(Comparator.comparing(Category::getDisplayOrder))
+                .map(root -> buildCategoryNode(root, byParent, locale, 0))
+                .toList();
+    }
+
+    /** Every brand, including inactive ones, for the same reason as the category tree. */
+    @Transactional(readOnly = true)
+    public List<BrandResponse> listBrands(String locale) {
+        return brandRepository.findAllByOrderByNameArAsc().stream()
+                .map(brand -> mapper.toBrand(brand, locale))
+                .toList();
+    }
+
+    private CategoryTreeResponse buildCategoryNode(Category category,
+                                                    Map<Long, List<Category>> byParent,
+                                                    String locale,
+                                                    int depth) {
+        // Guard against a cycle introduced by a bad parent_id, same as the storefront tree.
+        List<CategoryTreeResponse> children = depth >= 5
+                ? List.of()
+                : byParent.getOrDefault(category.getId(), List.of()).stream()
+                        .sorted(Comparator.comparing(Category::getDisplayOrder))
+                        .map(child -> buildCategoryNode(child, byParent, locale, depth + 1))
+                        .toList();
+
+        return mapper.toTreeNode(category, locale, children);
+    }
+
+    private AttributeAdminResponse toAttributeAdminResponse(Attribute attribute) {
+        AttributeTranslation ar = attribute.getTranslations().get("ar");
+        AttributeTranslation en = attribute.getTranslations().get("en");
+
+        /*
+         * The entity graph joins "translations", "values" and "values.translations"
+         * in one query. Fetch-joining a bag (List) alongside another collection is a
+         * cartesian product at the row level: with 2 translations and 2 values,
+         * Hibernate hydrates the SAME "values" list once per translation row, so each
+         * value ends up added twice. distinct() collapses it back — the duplicates
+         * are the same managed entity instance (Hibernate's first-level cache), so
+         * reference equality is enough.
+         */
+        List<AttributeAdminResponse.ValueResponse> values = attribute.getValues().stream()
+                .distinct()
+                .map(this::toValueAdminResponse)
+                .toList();
+
+        return new AttributeAdminResponse(
+                attribute.getId(),
+                attribute.getCode(),
+                attribute.getDataType().name(),
+                attribute.isVariantDefining(),
+                attribute.isFilterable(),
+                attribute.getDisplayOrder(),
+                ar == null ? null : ar.getName(),
+                en == null ? null : en.getName(),
+                values);
+    }
+
+    private AttributeAdminResponse.ValueResponse toValueAdminResponse(AttributeValue value) {
+        AttributeValueTranslation ar = value.getTranslations().get("ar");
+        AttributeValueTranslation en = value.getTranslations().get("en");
+
+        return new AttributeAdminResponse.ValueResponse(
+                value.getId(),
+                value.getCode(),
+                value.getHexColor(),
+                value.getDisplayOrder(),
+                ar == null ? null : ar.getName(),
+                en == null ? null : en.getName());
     }
 
     // ----------------------------------------------------------------- category

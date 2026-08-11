@@ -1,21 +1,29 @@
 package com.velora.api.catalog.web.admin;
 
+import com.velora.api.catalog.dto.BrandResponse;
+import com.velora.api.catalog.dto.CategoryTreeResponse;
+import com.velora.api.catalog.dto.admin.AttributeAdminResponse;
 import com.velora.api.catalog.dto.admin.AttributeSaveRequest;
 import com.velora.api.catalog.dto.admin.BrandSaveRequest;
 import com.velora.api.catalog.dto.admin.CategorySaveRequest;
 import com.velora.api.catalog.service.admin.TaxonomyAdminService;
+import com.velora.api.catalog.web.LocaleResolver;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import java.util.List;
 import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @Tag(name = "Admin — Taxonomy",
@@ -29,6 +37,15 @@ public class AdminTaxonomyController {
 
     public AdminTaxonomyController(TaxonomyAdminService taxonomyService) {
         this.taxonomyService = taxonomyService;
+    }
+
+    @Operation(summary = "Full category tree",
+            description = "Includes inactive categories, so staff can find and "
+                    + "reactivate what they turned off. Same shape as the storefront "
+                    + "tree at GET /api/v1/categories/tree.")
+    @GetMapping("/categories")
+    public List<CategoryTreeResponse> listCategories(HttpServletRequest request) {
+        return taxonomyService.getCategoryTree(LocaleResolver.resolve(request));
     }
 
     @Operation(summary = "Create a category")
@@ -46,6 +63,15 @@ public class AdminTaxonomyController {
         return Map.of("id", taxonomyService.updateCategory(id, request));
     }
 
+    @Operation(summary = "List all brands",
+            description = "Includes inactive brands, so staff can find and "
+                    + "reactivate what they turned off. Same shape as the storefront "
+                    + "list at GET /api/v1/brands.")
+    @GetMapping("/brands")
+    public List<BrandResponse> listBrands(HttpServletRequest request) {
+        return taxonomyService.listBrands(LocaleResolver.resolve(request));
+    }
+
     @Operation(summary = "Create a brand")
     @PostMapping("/brands")
     public ResponseEntity<Map<String, Long>> createBrand(
@@ -59,6 +85,25 @@ public class AdminTaxonomyController {
     public Map<String, Long> updateBrand(@PathVariable Long id,
                                          @Valid @RequestBody BrandSaveRequest request) {
         return Map.of("id", taxonomyService.saveBrand(id, request));
+    }
+
+    @Operation(summary = "List all attributes",
+            description = """
+                    Every attribute, with its values and translations. Not paginated —
+                    the catalog only ever has a handful of attributes.
+
+                    Unlike the storefront filter facets, this includes attributes that
+                    are not `filterable` — specification-only attributes (movement,
+                    water resistance) still need to be visible to staff.
+
+                    Each attribute's `id` and each value's `id` can be sent straight to
+                    `POST /admin/products/{productId}/variants/preview` as
+                    `attributeId` / `valueIds`.
+                    """)
+    @GetMapping("/attributes")
+    public List<AttributeAdminResponse> listAttributes(
+            @RequestParam(required = false) Boolean variantDefining) {
+        return taxonomyService.listAttributes(variantDefining);
     }
 
     @Operation(summary = "Create an attribute",

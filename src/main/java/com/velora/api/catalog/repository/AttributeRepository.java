@@ -13,6 +13,17 @@ public interface AttributeRepository extends JpaRepository<Attribute, Long> {
     @EntityGraph(attributePaths = {"translations", "values", "values.translations"})
     List<Attribute> findByFilterableTrueOrderByDisplayOrderAsc();
 
+    /**
+     * Admin listing: every attribute regardless of {@code filterable}, since staff
+     * need to see specification-only attributes too, not just the storefront facets.
+     */
+    @EntityGraph(attributePaths = {"translations", "values", "values.translations"})
+    List<Attribute> findAllByOrderByDisplayOrderAsc();
+
+    /** Same as above, narrowed to variant-defining or specification-only attributes. */
+    @EntityGraph(attributePaths = {"translations", "values", "values.translations"})
+    List<Attribute> findByVariantDefiningOrderByDisplayOrderAsc(boolean variantDefining);
+
     Optional<Attribute> findByCode(String code);
 
     /** Checked before insert so the user gets ATTRIBUTE_CODE_EXISTS, not a raw 500. */
