@@ -4,6 +4,7 @@ import com.velora.api.cart.domain.Cart;
 import com.velora.api.cart.domain.CartItem;
 import com.velora.api.cart.domain.CartStatus;
 import com.velora.api.cart.repository.CartRepository;
+import com.velora.api.cart.security.GuestTokenService;
 import com.velora.api.common.exception.BusinessException;
 import com.velora.api.common.exception.ErrorCode;
 import com.velora.api.common.util.MoneyUtils;
@@ -39,15 +40,18 @@ public class ShippingService {
     private final ShippingRateRepository rateRepository;
     private final CartRepository cartRepository;
     private final ShippingCalculator calculator;
+    private final GuestTokenService guestTokenService;
 
     public ShippingService(GovernorateRepository governorateRepository,
                            ShippingRateRepository rateRepository,
                            CartRepository cartRepository,
-                           ShippingCalculator calculator) {
+                           ShippingCalculator calculator,
+                           GuestTokenService guestTokenService) {
         this.governorateRepository = governorateRepository;
         this.rateRepository = rateRepository;
         this.cartRepository = cartRepository;
         this.calculator = calculator;
+        this.guestTokenService = guestTokenService;
     }
 
     /**
@@ -151,6 +155,10 @@ public class ShippingService {
                     .orElseThrow(() -> new BusinessException(ErrorCode.CART_EMPTY));
         }
         if (guestToken != null && !guestToken.isBlank()) {
+            // Resolves a cart straight from the guest token, the same as
+            // CartService.findOrCreate() — same verification for the same reason: a
+            // quote leaks cart subtotal and weight to anyone holding the token.
+            guestTokenService.verify(guestToken);
             return cartRepository.findByGuestTokenAndStatus(guestToken, CartStatus.ACTIVE)
                     .orElseThrow(() -> new BusinessException(ErrorCode.CART_EMPTY));
         }

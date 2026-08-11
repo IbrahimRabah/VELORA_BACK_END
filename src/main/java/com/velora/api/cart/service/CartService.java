@@ -9,6 +9,7 @@ import com.velora.api.cart.dto.CartResponse;
 import com.velora.api.cart.dto.CartWarning;
 import com.velora.api.cart.repository.CartItemRepository;
 import com.velora.api.cart.repository.CartRepository;
+import com.velora.api.cart.security.GuestTokenService;
 import com.velora.api.catalog.domain.Product;
 import com.velora.api.catalog.domain.ProductImage;
 import com.velora.api.catalog.domain.ProductStatus;
@@ -50,15 +51,18 @@ public class CartService {
     private final CartItemRepository cartItemRepository;
     private final ProductVariantRepository variantRepository;
     private final AppUserRepository userRepository;
+    private final GuestTokenService guestTokenService;
 
     public CartService(CartRepository cartRepository,
                        CartItemRepository cartItemRepository,
                        ProductVariantRepository variantRepository,
-                       AppUserRepository userRepository) {
+                       AppUserRepository userRepository,
+                       GuestTokenService guestTokenService) {
         this.cartRepository = cartRepository;
         this.cartItemRepository = cartItemRepository;
         this.variantRepository = variantRepository;
         this.userRepository = userRepository;
+        this.guestTokenService = guestTokenService;
     }
 
     // --------------------------------------------------------------------- read
@@ -162,6 +166,9 @@ public class CartService {
      */
     @Transactional
     public CartResponse mergeGuestCart(Long userId, String guestToken, String locale) {
+        // Resolved separately from findOrCreate() — verified here for the same reason.
+        guestTokenService.verify(guestToken);
+
         Cart accountCart = findOrCreate(userId, null);
 
         Optional<Cart> guestCartOpt =
@@ -269,6 +276,10 @@ public class CartService {
             throw new BusinessException(ErrorCode.VALIDATION_FAILED,
                     "Sign in, or send an X-Guest-Token header");
         }
+        // Every guest-identified cart lookup or creation goes through here — this is
+        // the single choke point that keeps one guest from reading or editing
+        // another guest's cart by guessing or reusing their token.
+        guestTokenService.verify(guestToken);
 
         return cartRepository.findByGuestTokenAndStatus(guestToken, CartStatus.ACTIVE)
                 .orElseGet(() -> {

@@ -2,8 +2,10 @@ package com.velora.api.cart.web;
 
 import com.velora.api.cart.dto.AddToCartRequest;
 import com.velora.api.cart.dto.CartResponse;
+import com.velora.api.cart.dto.GuestTokenResponse;
 import com.velora.api.cart.dto.MergeCartRequest;
 import com.velora.api.cart.dto.UpdateCartItemRequest;
+import com.velora.api.cart.security.GuestTokenService;
 import com.velora.api.cart.service.CartService;
 import com.velora.api.catalog.web.LocaleResolver;
 import com.velora.api.identity.security.UserPrincipal;
@@ -40,9 +42,28 @@ public class CartController {
     private static final String GUEST_HEADER = "X-Guest-Token";
 
     private final CartService cartService;
+    private final GuestTokenService guestTokenService;
 
-    public CartController(CartService cartService) {
+    public CartController(CartService cartService, GuestTokenService guestTokenService) {
         this.cartService = cartService;
+        this.guestTokenService = guestTokenService;
+    }
+
+    @Operation(summary = "Issue a guest token",
+            description = """
+                    Call once, before the first cart action, if the browser does not
+                    already have an X-Guest-Token. Store the result (a cookie, same as
+                    before) and send it back as X-Guest-Token on every subsequent cart,
+                    shipping-quote and checkout call.
+
+                    The token is signed server-side, so it cannot be forged for an id
+                    the caller does not already hold — knowing or guessing someone
+                    else's UUID is no longer enough to read or edit their cart.
+                    """,
+            security = {})
+    @PostMapping("/guest-token")
+    public GuestTokenResponse issueGuestToken() {
+        return new GuestTokenResponse(guestTokenService.generate());
     }
 
     @Operation(summary = "Get the cart",

@@ -52,6 +52,14 @@ velora:
     secret: ${JWT_SECRET}
     access-token-minutes: 30
     refresh-token-days: 30
+  guest-token:
+    # Falls back to JWT_SECRET so this does not become a second mandatory env var —
+    # set GUEST_TOKEN_SECRET explicitly to use a separate key.
+    secret: ${GUEST_TOKEN_SECRET:${JWT_SECRET}}
+    # Transition switch: accept old, unsigned X-Guest-Token values (logged at WARN)
+    # instead of rejecting every cart created before signing existed. Flip to false
+    # once enough time has passed that no legitimate legacy cart is still in use.
+    accept-legacy-unsigned: true
   cors:
     allowed-origins: http://localhost:4200
   business:
