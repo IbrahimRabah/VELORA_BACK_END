@@ -1048,7 +1048,22 @@ Base path: `/api/v1/cart`, `/api/v1/orders`
 
 ### CartController
 
-All cart endpoints are public — usable signed in (Bearer token) or as a guest via `X-Guest-Token` (a UUID the client generates once and stores). When a Bearer token is present it takes priority over the header. The cart is recalculated from current prices/stock on every call; `warnings` reports what changed since items were added, and `checkoutReady` is `false` when a blocking warning is present (out of stock / unavailable / quantity reduced), as opposed to the non-blocking `PRICE_CHANGED`.
+All cart endpoints are public — usable signed in (Bearer token) or as a guest via `X-Guest-Token`. When a Bearer token is present it takes priority over the header. The cart is recalculated from current prices/stock on every call; `warnings` reports what changed since items were added, and `checkoutReady` is `false` when a blocking warning is present (out of stock / unavailable / quantity reduced), as opposed to the non-blocking `PRICE_CHANGED`.
+
+**`X-Guest-Token` is now issued and signed by the server** — call `POST /api/v1/cart/guest-token` once and store the result (a cookie, same as before); do not generate the UUID client-side anymore. Every endpoint below that accepts the header verifies its signature before touching the cart, so a stolen or guessed UUID alone is no longer enough to read or edit someone else's cart. Old, unsigned tokens (from before this changed) are still accepted for now — see `401 TOKEN_INVALID` in each endpoint's error table.
+
+#### `POST /api/v1/cart/guest-token`
+**Summary:** Issue a fresh, signed guest token. Call once, before the first cart action, if the browser does not already have one.
+
+**Success response `200`:**
+```json
+{ "guestToken": "3fa1c8d0-e5b6-479a-8c2d-1e0f9b8a7c6d.kY3o2b1J9z8xW6vU5tS4rQ3pO2nM1lK0jI9hG8fE7d" }
+```
+Send this back as `X-Guest-Token` on every subsequent cart, shipping-quote and checkout call.
+
+**Error responses:** none beyond the global conventions.
+
+---
 
 #### `GET /api/v1/cart`
 **Summary:** Get the current cart, recalculated server-side.
@@ -1075,7 +1090,7 @@ All cart endpoints are public — usable signed in (Bearer token) or as a guest 
 }
 ```
 
-**Error responses:** `400 VALIDATION_FAILED` — not signed in and no `X-Guest-Token` sent.
+**Error responses:** `400 VALIDATION_FAILED` — not signed in and no `X-Guest-Token` sent. `401 TOKEN_INVALID` — the guest token's signature is wrong, or it's an unsigned legacy token and the transition flag is off.
 
 ---
 
@@ -1095,6 +1110,7 @@ All cart endpoints are public — usable signed in (Bearer token) or as a guest 
 | Status | Code | When |
 |---|---|---|
 | 400 | VALIDATION_FAILED | No guest token / not signed in, or cart already at 50 distinct lines |
+| 401 | TOKEN_INVALID | Guest token signature is wrong, or unsigned and the transition flag is off |
 | 404 | VARIANT_NOT_FOUND | Variant id does not exist |
 | 409 | PRODUCT_NOT_ACTIVE | Variant or its product is archived / not active |
 | 409 | STOCK_UNAVAILABLE | Requested quantity (plus any already in cart) exceeds available stock |
@@ -1113,7 +1129,7 @@ All cart endpoints are public — usable signed in (Bearer token) or as a guest 
 
 **Success response `200`:** `CartResponse`.
 
-**Error responses:** `400 VALIDATION_FAILED`, `404 CART_ITEM_NOT_FOUND`, `409 STOCK_UNAVAILABLE`.
+**Error responses:** `400 VALIDATION_FAILED`, `401 TOKEN_INVALID` (guest token signature wrong or unsigned with the transition flag off), `404 CART_ITEM_NOT_FOUND`, `409 STOCK_UNAVAILABLE`.
 
 ---
 
@@ -1124,7 +1140,7 @@ All cart endpoints are public — usable signed in (Bearer token) or as a guest 
 
 **Success response `200`:** `CartResponse` (without the removed line).
 
-**Error responses:** `400 VALIDATION_FAILED`, `404 CART_ITEM_NOT_FOUND`.
+**Error responses:** `400 VALIDATION_FAILED`, `401 TOKEN_INVALID` (guest token signature wrong or unsigned with the transition flag off), `404 CART_ITEM_NOT_FOUND`.
 
 ---
 
@@ -1142,7 +1158,7 @@ All cart endpoints are public — usable signed in (Bearer token) or as a guest 
 }
 ```
 
-**Error responses:** `400 VALIDATION_FAILED`.
+**Error responses:** `400 VALIDATION_FAILED`, `401 TOKEN_INVALID` (guest token signature wrong or unsigned with the transition flag off).
 
 ---
 
@@ -1157,7 +1173,7 @@ All cart endpoints are public — usable signed in (Bearer token) or as a guest 
 
 **Success response `200`:** `CartResponse` for the merged account cart.
 
-**Error responses:** `401 UNAUTHORIZED`.
+**Error responses:** `401 UNAUTHORIZED` (no valid Bearer token), `401 TOKEN_INVALID` (`guestToken` signature is wrong, or unsigned and the transition flag is off).
 
 ---
 
@@ -1170,7 +1186,7 @@ Turns a cart into an order in one transaction: reserves stock (guarded atomic up
 **Summary:** Place an order from the current cart.
 
 **Headers:**
-- `X-Guest-Token` — required only if not signed in.
+- `X-Guest-Token` — required only if not signed in. Must be a token issued by `POST /api/v1/cart/guest-token` (or a pre-existing unsigned legacy token, while the transition flag is on) — its signature is verified before the cart is loaded.
 - `Idempotency-Key` — optional, one UUID per checkout attempt. A repeat with the same key + same body returns the **same** order. Same key + different body is rejected. Same key while the first attempt is in flight is rejected as "already being processed." Same key after the first attempt failed is rejected — retry with a fresh key.
 
 **Request body:**
@@ -1235,6 +1251,7 @@ Supply either `addressId` (signed-in) or `address` inline (required for guest ch
 | 400 | INVALID_PHONE_FORMAT | Inline address phone is not a valid Egyptian mobile number |
 | 400 | VALIDATION_FAILED | Field validation failed, or a repeat `Idempotency-Key` with a different body, or the original attempt under that key failed |
 | 401 | UNAUTHORIZED | `addressId` supplied while not signed in |
+| 401 | TOKEN_INVALID | `X-Guest-Token` signature is wrong, or unsigned and the transition flag is off |
 | 404 | RESOURCE_NOT_FOUND | `addressId` / `governorateId` doesn't exist, or a saved address doesn't belong to the caller (identical 404 either way) |
 | 409 | STOCK_UNAVAILABLE | A cart line blocks checkout (out of stock, quantity reduced, reservation could not be granted) |
 | 409 | GOVERNORATE_NOT_SERVED | VELORA does not deliver to the given governorate |
@@ -1786,7 +1803,7 @@ Response language follows `Accept-Language` (`ar` default, or `en`) — not a qu
 **Auth:** Public — no token required even for signed-in customers, used during guest checkout.
 **Summary:** Quote delivery cost and estimate for the current cart to a governorate. Cash-on-delivery assumed. Cheap enough to call on every governorate change.
 
-**Headers:** `Authorization` (optional — resolves the caller's own cart), `X-Guest-Token` (optional — resolves a guest cart), `Accept-Language` (optional).
+**Headers:** `Authorization` (optional — resolves the caller's own cart), `X-Guest-Token` (optional — resolves a guest cart; signature verified the same as on cart endpoints), `Accept-Language` (optional).
 
 **Request body:**
 ```json
@@ -1809,6 +1826,7 @@ Response language follows `Accept-Language` (`ar` default, or `en`) — not a qu
 |---|---|---|
 | 400 | VALIDATION_FAILED | `governorateId` missing/null |
 | 400 | CART_EMPTY | No cart could be resolved, or the resolved/explicit cart isn't `ACTIVE` |
+| 401 | TOKEN_INVALID | `X-Guest-Token` signature is wrong, or unsigned and the transition flag is off |
 | 404 | RESOURCE_NOT_FOUND | `governorateId` doesn't match any governorate |
 | 409 | GOVERNORATE_NOT_SERVED | Governorate exists but has no configured shipping rate |
 

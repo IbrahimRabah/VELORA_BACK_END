@@ -50,7 +50,7 @@ public class Cart {
     private AppUser user;
 
     /** Random UUID stored in a browser cookie before the customer signs in. */
-    @Column(name = "guest_token", length = 64)
+    @Column(name = "guest_token", length = 200)
     private String guestToken;
 
     @Column(name = "coupon_code", length = 50)
