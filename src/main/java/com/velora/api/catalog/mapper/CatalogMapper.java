@@ -19,6 +19,7 @@ import com.velora.api.catalog.dto.ProductSummaryResponse;
 import com.velora.api.catalog.dto.SpecificationResponse;
 import com.velora.api.catalog.dto.VariantOptionResponse;
 import com.velora.api.catalog.dto.VariantResponse;
+import com.velora.api.common.storage.StorageService;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -38,6 +39,12 @@ import org.springframework.stereotype.Component;
 @Component
 public class CatalogMapper {
 
+    private final StorageService storageService;
+
+    public CatalogMapper(StorageService storageService) {
+        this.storageService = storageService;
+    }
+
     // ------------------------------------------------------------------ product
 
     public ProductSummaryResponse toSummary(Product product, String locale) {
@@ -51,7 +58,7 @@ public class CatalogMapper {
                 shortDescription(product, locale),
                 product.getBrand() == null ? null : product.getBrand().nameFor(locale),
                 product.getCategory() == null ? null : product.getCategory().getSlug(),
-                main == null ? null : main.getUrl(),
+                main == null ? null : storageService.urlFor(main.getUrl()),
                 main == null ? null : main.altFor(locale),
                 product.getMinPrice(),
                 product.getMaxPrice(),
@@ -200,8 +207,8 @@ public class CatalogMapper {
     public ImageResponse toImage(ProductImage image, String locale) {
         return new ImageResponse(
                 image.getId(),
-                image.getUrl(),
-                image.getThumbUrl(),
+                storageService.urlFor(image.getUrl()),
+                storageService.urlFor(image.getThumbUrl()),
                 image.altFor(locale),
                 image.isMain());
     }

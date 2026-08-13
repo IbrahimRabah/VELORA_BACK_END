@@ -9,6 +9,7 @@ import com.velora.api.catalog.domain.ProductTranslation;
 import com.velora.api.catalog.domain.ProductVariant;
 import com.velora.api.common.exception.BusinessException;
 import com.velora.api.common.exception.ErrorCode;
+import com.velora.api.common.storage.StorageService;
 import com.velora.api.common.util.MoneyUtils;
 import com.velora.api.common.util.PhoneNormalizer;
 import com.velora.api.customer.domain.CustomerAddress;
@@ -73,6 +74,7 @@ public class CheckoutService {
     private final OrderRepository orderRepository;
     private final OrderStatusHistoryRepository historyRepository;
     private final OrderNumberGenerator orderNumberGenerator;
+    private final StorageService storageService;
 
     public CheckoutService(CartService cartService,
                            ReservationService reservationService,
@@ -83,7 +85,8 @@ public class CheckoutService {
                            AppUserRepository userRepository,
                            OrderRepository orderRepository,
                            OrderStatusHistoryRepository historyRepository,
-                           OrderNumberGenerator orderNumberGenerator) {
+                           OrderNumberGenerator orderNumberGenerator,
+                           StorageService storageService) {
         this.cartService = cartService;
         this.reservationService = reservationService;
         this.shippingService = shippingService;
@@ -94,6 +97,7 @@ public class CheckoutService {
         this.orderRepository = orderRepository;
         this.historyRepository = historyRepository;
         this.orderNumberGenerator = orderNumberGenerator;
+        this.storageService = storageService;
     }
 
     /**
@@ -214,7 +218,7 @@ public class CheckoutService {
                     nameFor(product, "en"),
                     variant.getSku(),
                     summaryFor(variant, locale),
-                    image == null ? null : image.getUrl(),
+                    image == null ? null : storageService.urlFor(image.getUrl()),
                     variant.getPrice(),
                     variant.getTaxRate(),
                     variant.getWeightGrams(),

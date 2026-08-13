@@ -18,6 +18,7 @@ import com.velora.api.catalog.domain.VariantStatus;
 import com.velora.api.catalog.repository.ProductVariantRepository;
 import com.velora.api.common.exception.BusinessException;
 import com.velora.api.common.exception.ErrorCode;
+import com.velora.api.common.storage.StorageService;
 import com.velora.api.common.util.MoneyUtils;
 import com.velora.api.identity.domain.AppUser;
 import com.velora.api.identity.repository.AppUserRepository;
@@ -52,17 +53,20 @@ public class CartService {
     private final ProductVariantRepository variantRepository;
     private final AppUserRepository userRepository;
     private final GuestTokenService guestTokenService;
+    private final StorageService storageService;
 
     public CartService(CartRepository cartRepository,
                        CartItemRepository cartItemRepository,
                        ProductVariantRepository variantRepository,
                        AppUserRepository userRepository,
-                       GuestTokenService guestTokenService) {
+                       GuestTokenService guestTokenService,
+                       StorageService storageService) {
         this.cartRepository = cartRepository;
         this.cartItemRepository = cartItemRepository;
         this.variantRepository = variantRepository;
         this.userRepository = userRepository;
         this.guestTokenService = guestTokenService;
+        this.storageService = storageService;
     }
 
     // --------------------------------------------------------------------- read
@@ -374,7 +378,7 @@ public class CartService {
                     product.nameFor(locale),
                     summaryFor(variant, locale),
                     variant.getSku(),
-                    image == null ? null : image.getUrl(),
+                    image == null ? null : storageService.urlFor(image.getUrl()),
                     unitPrice,
                     item.getPriceAtAdd(),
                     item.priceChanged(),

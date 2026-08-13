@@ -400,7 +400,7 @@ All endpoints in this section are public (no auth). Response locale is resolved 
 }
 ```
 
-**Error responses:** `400 VALIDATION_FAILED` / `400 INVALID_PARAMETER` on a malformed filter param.
+**Error responses:** `400 INVALID_PARAMETER` on a malformed filter param (e.g. non-numeric `categoryId`). `ProductFilterRequest` carries no Bean Validation constraints and isn't `@Valid`-checked, so `VALIDATION_FAILED` cannot occur here.
 
 ---
 
@@ -799,9 +799,10 @@ An unknown `productId` returns an empty array rather than a 404.
 {
   "totalCombinations": 6, "existingCount": 1,
   "combinations": [ { "suggestedSku": "VLR-CLASSIC-GLD-42", "summary": "ذهبي / 42 مم", "attributeValueIds": [15, 22], "valueNames": ["Gold", "42mm"], "alreadyExists": false } ],
-  "warnings": ["Capped at 200 combinations — narrow your selection"]
+  "warnings": ["1 combination(s) already exist and will be skipped on save."]
 }
 ```
+Two independent warnings can appear: `"The selection produces %d combinations. Showing the first 200 — select fewer values, or add the rest individually."` when the full cartesian product exceeds 200, and `"%d combination(s) already exist and will be skipped on save."` when any generated combination matches an existing variant.
 
 **Error responses:**
 | Status | Code | When |
@@ -995,7 +996,7 @@ An inactive category appears here exactly like an active one (including inside `
 ---
 
 #### `POST /api/v1/admin/attributes`
-**Summary:** Create an attribute, optionally with its allowed values in the same call. `variantDefining: true` generates SKUs (colour, size); `false` is specification-only (movement, water resistance) — this flag can't be changed later once variants depend on it.
+**Summary:** Create an attribute, optionally with its allowed values in the same call. `variantDefining: true` generates SKUs (colour, size); `false` is specification-only (movement, water resistance) — this flag can never be changed on a later update, even if no variant actually uses the attribute yet; create a new attribute instead.
 
 **Request body:**
 ```json
@@ -1036,7 +1037,7 @@ An inactive category appears here exactly like an active one (including inside `
 |---|---|---|
 | 404 | ATTRIBUTE_NOT_FOUND | No attribute with this id |
 | 409 | ATTRIBUTE_CODE_EXISTS | Changing `code` to one already used by another attribute |
-| 409 | ATTRIBUTE_IN_USE | Attempting to flip `variantDefining` on an attribute already used by variants |
+| 409 | ATTRIBUTE_IN_USE | Sending a `variantDefining` value that differs from the attribute's stored one on an update. Unconditional — the check does not actually verify any variant references the attribute; the only way to change the flag is to create a new attribute |
 | 409 | ATTRIBUTE_VALUE_CODE_EXISTS | Duplicate `code` within `values[]` |
 
 > `404 ATTRIBUTE_VALUE_NOT_FOUND` exists in the catalog but this service doesn't look values up by id here — an unrecognized `id` in `values[]` is treated as a new value.
@@ -1163,7 +1164,7 @@ Send this back as `X-Guest-Token` on every subsequent cart, shipping-quote and c
 ---
 
 #### `POST /api/v1/cart/merge`
-**Auth:** Authenticated
+**Auth:** Intended to be Authenticated, but `/api/v1/cart/**` is covered by the blanket `permitAll()` rule for the cart module in `SecurityConfig`, so nothing at the gateway actually requires a Bearer token on this specific path.
 **Summary:** Fold a guest cart into the signed-in account's cart, right after login. Quantities are added together and capped at available stock. If the guest token doesn't resolve to an active cart, the account cart is returned unchanged (not an error).
 
 **Request body:**
@@ -1173,7 +1174,7 @@ Send this back as `X-Guest-Token` on every subsequent cart, shipping-quote and c
 
 **Success response `200`:** `CartResponse` for the merged account cart.
 
-**Error responses:** `401 UNAUTHORIZED` (no valid Bearer token), `401 TOKEN_INVALID` (`guestToken` signature is wrong, or unsigned and the transition flag is off).
+**Error responses:** `401 TOKEN_INVALID` (`guestToken` signature is wrong, or unsigned and the transition flag is off). Note: an anonymous call does NOT get a clean `401 UNAUTHORIZED` — `CartController.merge()` reads `principal.id()` directly with no null check (unlike every other method on this controller), so a missing/invalid Bearer token causes a `NullPointerException` that the global handler reports as a generic `500 INTERNAL_ERROR`. Always send a valid Bearer token when calling this endpoint.
 
 ---
 
@@ -1215,7 +1216,7 @@ Supply either `addressId` (signed-in) or `address` inline (required for guest ch
 **Success response `201`:**
 ```json
 {
-  "id": 9042, "orderNumber": "VLR-2026-009042",
+  "id": 9042, "orderNumber": "VLR-260812-9042",
   "fulfillmentStatus": "PENDING", "paymentStatus": "PENDING", "paymentMethod": "COD", "currency": "EGP",
   "subtotal": 8500.0000, "discountTotal": 0.0000, "shippingCost": 75.0000, "codFee": 25.0000,
   "grandTotal": 8600.0000, "taxTotal": 1108.7000, "netTotal": 7491.3000,
@@ -1598,7 +1599,7 @@ Address phone fields are normalized to E.164 on write but rendered back in local
     { "id": 41, "label": "HOME", "recipientName": "محمد أحمد", "phone": "01012345678", "governorate": "القاهرة", "formatted": "شارع الجمهورية, building 12, floor 3, apt 5, المنيا الجديدة (بجوار مسجد النور)", "isDefault": true }
   ],
   "recentOrders": [
-    { "id": 5231, "orderNumber": "VEL-2026-005231", "fulfillmentStatus": "DELIVERED", "paymentStatus": "PAID", "grandTotal": 4500.0000, "itemCount": 2, "placedAt": "2026-08-01T14:22:00Z" }
+    { "id": 5231, "orderNumber": "VLR-260801-5231", "fulfillmentStatus": "DELIVERED", "paymentStatus": "PAID", "grandTotal": 4500.0000, "itemCount": 2, "placedAt": "2026-08-01T14:22:00Z" }
   ]
 }
 ```
@@ -1715,7 +1716,7 @@ Invoices are **immutable once issued** — there is no update endpoint. Numberin
 {
   "content": [
     {
-      "id": 551, "invoiceNumber": "VLR-INV-2026-000001", "status": "ISSUED", "orderId": 2044, "orderNumber": "ORD-7F3A9C",
+      "id": 551, "invoiceNumber": "VLR-INV-2026-000001", "status": "ISSUED", "orderId": 2044, "orderNumber": "VLR-260810-2044",
       "buyerName": "Mostafa Yehia", "buyerPhone": "01012345678",
       "grandTotal": "4250.0000", "taxTotal": "553.6200", "netTotal": "3696.3800", "currency": "EGP",
       "pdfUrl": "https://storage.velora.com/invoices/VLR-INV-2026-000001.pdf",
@@ -2111,9 +2112,9 @@ Reconciles cash-on-delivery cash the courier is holding against what actually ge
 
 **Query params:** `reason` (required, non-blank — appended to the stored note).
 
-**Success response `200`:** the remittance with `status: "CANCELLED"` and the note appended with `| CANCELLED: <reason>`.
+**Success response `200`:** the remittance with `status: "CANCELLED"`. The note becomes `<reason>` if the remittance had no note yet, or `<original note> | CANCELLED: <reason>` if one already existed.
 
-**Error responses:** `404 RESOURCE_NOT_FOUND`, `400 VALIDATION_FAILED` (`reason` missing), `409 INVALID_STATUS_TRANSITION` (already cancelled).
+**Error responses:** `404 RESOURCE_NOT_FOUND`, `400 INVALID_PARAMETER` (`reason` omitted from the query string entirely — it is a mandatory `@RequestParam` with no default, so Spring rejects the request before the controller runs), `400 VALIDATION_FAILED` (`reason` sent but blank, e.g. `?reason=`), `409 INVALID_STATUS_TRANSITION` (already cancelled).
 
 ---
 
