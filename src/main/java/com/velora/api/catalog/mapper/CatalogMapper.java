@@ -101,7 +101,9 @@ public class CatalogMapper {
     // ------------------------------------------------------------------ variant
 
     public VariantResponse toVariant(ProductVariant variant, Product product, String locale) {
+        // See variantSummary() for why distinct() is required here.
         List<Long> valueIds = variant.getAttributeValues().stream()
+                .distinct()
                 .map(vav -> vav.getAttributeValue().getId())
                 .toList();
 
@@ -125,12 +127,24 @@ public class CatalogMapper {
         // Note: getCostPrice() is deliberately absent. It is owner-only.
     }
 
-    /** Builds "ذهبي / 42 مم" from the variant's defining attribute values. */
+    /**
+     * Builds "ذهبي / 42 مم" from the variant's defining attribute values.
+     *
+     * <p>{@code ProductVariantRepository.findByProductIdAndArchivedAtIsNullOrderByPositionAsc}
+     * fetch-joins {@code attributeValues} alongside {@code attributeValue.translations}
+     * in one query. Fetch-joining two bags together is a cartesian product at the row
+     * level: a value with 2 translations (ar + en) makes Hibernate hydrate the SAME
+     * {@code VariantAttributeValue} row twice, so it would otherwise render as
+     * "ذهبي / ذهبي". {@code distinct()} collapses it back — the duplicates are the
+     * same managed entity instance (Hibernate's first-level cache), so reference
+     * equality is enough. Same issue as {@code AttributeRepository}.
+     */
     public String variantSummary(ProductVariant variant, String locale) {
         if (variant.getAttributeValues().isEmpty()) {
             return null;
         }
         return variant.getAttributeValues().stream()
+                .distinct()
                 .sorted(Comparator.comparing(vav -> vav.getAttribute().getDisplayOrder()))
                 .map(vav -> vav.getAttributeValue().nameFor(locale))
                 .reduce((a, b) -> a + " / " + b)

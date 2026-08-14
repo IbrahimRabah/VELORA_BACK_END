@@ -343,11 +343,23 @@ public class VariantAdminService {
     private VariantAdminResponse toResponse(ProductVariant variant) {
         Inventory inventory = inventoryRepository.findByVariantId(variant.getId()).orElse(null);
 
+        /*
+         * findByProductIdAndArchivedAtIsNullOrderByPositionAsc fetch-joins
+         * attributeValues alongside attributeValue.translations. Fetch-joining two
+         * bags in one query is a cartesian product at the row level: an attribute
+         * value with 2 translations makes Hibernate hydrate that SAME
+         * VariantAttributeValue row twice. distinct() collapses it back — the
+         * duplicates are the same managed entity instance (Hibernate's
+         * first-level cache), so reference equality is enough. Same issue as
+         * AttributeRepository / TaxonomyAdminService.
+         */
         List<Long> valueIds = variant.getAttributeValues().stream()
+                .distinct()
                 .map(vav -> vav.getAttributeValue().getId())
                 .toList();
 
         String summary = variant.getAttributeValues().stream()
+                .distinct()
                 .map(vav -> vav.getAttributeValue().nameFor("ar"))
                 .reduce((a, b) -> a + " / " + b)
                 .orElse(null);
