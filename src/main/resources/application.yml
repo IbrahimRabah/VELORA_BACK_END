@@ -61,7 +61,7 @@ velora:
     # once enough time has passed that no legitimate legacy cart is still in use.
     accept-legacy-unsigned: true
   cors:
-    allowed-origins: http://localhost:4200
+    allowed-origins: http://localhost:*,http://127.0.0.1:*,http://192.168.*:*
   business:
     reservation-ttl-minutes: 20
     default-tax-rate: 0.14

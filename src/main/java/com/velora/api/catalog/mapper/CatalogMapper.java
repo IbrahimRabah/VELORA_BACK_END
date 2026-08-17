@@ -88,7 +88,12 @@ public class CatalogMapper {
                 buildVariantOptions(variants, locale),
                 variants.stream().map(v -> toVariant(v, product, locale)).toList(),
                 buildSpecifications(product, locale),
-                product.getImages().stream().map(i -> toImage(i, locale)).toList(),
+                // ProductRepository.findBySlugAndArchivedAtIsNull fetch-joins "images"
+                // alongside "translations" and "category.translations" — two Maps and a
+                // bag in one query multiplies every image row by 2x2. distinct() collapses
+                // it back to the same managed ProductImage instances. Same issue as
+                // AttributeRepository / ProductVariantRepository (see variantSummary()).
+                product.getImages().stream().distinct().map(i -> toImage(i, locale)).toList(),
                 product.isInStock(),
                 product.isFeatured(),
                 product.isNewArrival(),
@@ -108,6 +113,7 @@ public class CatalogMapper {
                 .toList();
 
         List<ImageResponse> variantImages = product.getImages().stream()
+                .distinct()
                 .filter(img -> img.getVariant() != null
                         && img.getVariant().getId().equals(variant.getId()))
                 .map(img -> toImage(img, locale))
