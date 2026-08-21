@@ -23,10 +23,14 @@ public enum ErrorCode {
     FORBIDDEN("You do not have permission to perform this action", HttpStatus.FORBIDDEN),
     INTERNAL_ERROR("An unexpected error occurred", HttpStatus.INTERNAL_SERVER_ERROR),
 
-    /** Fallback for any database uniqueness or FK constraint we did not check first. */
+    /** Fallback for any database uniqueness constraint we did not check first. */
     DUPLICATE_VALUE("This value is already in use", HttpStatus.CONFLICT),
     REFERENCED_BY_OTHER_RECORDS("This record is used elsewhere and cannot be removed",
             HttpStatus.CONFLICT),
+    /** A foreign key pointed at a parent row that does not exist. */
+    INVALID_REFERENCE("This refers to a record that does not exist", HttpStatus.BAD_REQUEST),
+    /** A NOT NULL column was left empty — the schema requires a field the request omitted. */
+    REQUIRED_FIELD_MISSING("A required field is missing", HttpStatus.BAD_REQUEST),
 
     // ---- files ----
     FILE_TOO_LARGE("The file is larger than the allowed size", HttpStatus.PAYLOAD_TOO_LARGE),

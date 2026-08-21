@@ -7,6 +7,8 @@ import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -117,25 +119,62 @@ public class GlobalExceptionHandler {
     // ---------------------------------------------------------------- database
 
     /**
-     * A database constraint fired. This is the safety net: every unique index and
-     * foreign key we did not check explicitly ends up here as a clean 409 instead
-     * of a 500 that tells the user nothing.
+     * SQL Server's message for a NOT NULL violation is always
+     * {@code Cannot insert the value NULL into column '<col>', table '<schema.table>';
+     * column does not allow nulls.} — regardless of whether the statement was an
+     * INSERT or an UPDATE. The column name is the one useful, safe-to-return part of
+     * that sentence; the table name stays server-side.
+     */
+    private static final Pattern NOT_NULL_COLUMN =
+            Pattern.compile("insert the value null into column '([^']+)'", Pattern.CASE_INSENSITIVE);
+
+    /**
+     * A database constraint fired. This is the safety net: every unique index, NOT
+     * NULL column and foreign key we did not check explicitly ends up here as a
+     * clean 4xx instead of a 500 that tells the user nothing.
      *
-     * <p>The raw SQL message names tables and columns, so it is logged but never
-     * returned. Where the constraint name is recognisable we upgrade the response
-     * to the precise code.
+     * <p>The raw SQL message names tables, so it is logged but never returned in
+     * full. Three distinct failures land here and must not collapse into the same
+     * code, or the client is told "this value is already in use" for a bug that has
+     * nothing to do with duplication:
+     * <ul>
+     *   <li>a NOT NULL column the request left empty — a schema requirement the DTO
+     *       does not enforce, most often because a field was deliberately dropped
+     *       from the request but the column was never migrated to match</li>
+     *   <li>a foreign key pointing at a parent row that does not exist (INSERT/UPDATE)</li>
+     *   <li>a foreign key blocking a DELETE because child rows still reference it</li>
+     *   <li>an actual unique constraint violation — the only case that is really a
+     *       duplicate value</li>
+     * </ul>
      */
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ProblemDetail handleDataIntegrity(DataIntegrityViolationException ex,
                                              HttpServletRequest request) {
-        String raw = rootMessage(ex).toLowerCase(Locale.ENGLISH);
+        String raw = rootMessage(ex);
         log.warn("Data integrity violation on {}: {}", request.getRequestURI(), raw);
+        String lower = raw.toLowerCase(Locale.ENGLISH);
 
-        ErrorCode code = mapConstraint(raw);
-        return build(code, null, request);
+        Matcher notNull = NOT_NULL_COLUMN.matcher(raw);
+        if (notNull.find()) {
+            return build(ErrorCode.REQUIRED_FIELD_MISSING,
+                    "The '%s' field is required".formatted(notNull.group(1)), request);
+        }
+
+        // SQL Server phrases these two differently: a DELETE blocked by children says
+        // "conflicted with the REFERENCE constraint"; an INSERT/UPDATE pointing at a
+        // missing parent says "conflicted with the FOREIGN KEY constraint". Checking
+        // "reference constraint" first matters — it is the more specific phrase.
+        if (lower.contains("reference constraint")) {
+            return build(ErrorCode.REFERENCED_BY_OTHER_RECORDS, null, request);
+        }
+        if (lower.contains("foreign key constraint")) {
+            return build(ErrorCode.INVALID_REFERENCE, null, request);
+        }
+
+        return build(mapConstraint(lower), null, request);
     }
 
-    /** Maps a database constraint name onto a specific, user-facing code. */
+    /** Maps a unique constraint name onto a specific, user-facing code. */
     private ErrorCode mapConstraint(String message) {
         if (message.contains("uq_attr_code")) {
             return ErrorCode.ATTRIBUTE_CODE_EXISTS;
@@ -156,10 +195,6 @@ public class GlobalExceptionHandler {
         }
         if (message.contains("uq_av_code")) {
             return ErrorCode.ATTRIBUTE_VALUE_CODE_EXISTS;
-        }
-        // A foreign key blocked a delete rather than a unique index blocking an insert.
-        if (message.contains("reference constraint") || message.contains("foreign key")) {
-            return ErrorCode.REFERENCED_BY_OTHER_RECORDS;
         }
         return ErrorCode.DUPLICATE_VALUE;
     }

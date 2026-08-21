@@ -16,6 +16,10 @@ public record ProductAdminResponse(
         String status,
         String nameAr,
         String nameEn,
+        @Schema(description = "Full translated content per locale — name, descriptions and SEO "
+                + "meta. Load this into the edit form and send it back whole; a response "
+                + "missing a field here would round-trip as that field being cleared.")
+        List<TranslationResponse> translations,
         Long categoryId,
         String categoryName,
         Long brandId,

@@ -11,6 +11,7 @@ import com.velora.api.catalog.dto.admin.ProductAdminResponse;
 import com.velora.api.catalog.dto.admin.ProductCreateRequest;
 import com.velora.api.catalog.dto.admin.ProductUpdateRequest;
 import com.velora.api.catalog.dto.admin.TranslationRequest;
+import com.velora.api.catalog.dto.admin.TranslationResponse;
 import com.velora.api.catalog.repository.AttributeRepository;
 import com.velora.api.catalog.repository.BrandRepository;
 import com.velora.api.catalog.repository.CategoryRepository;
@@ -23,6 +24,7 @@ import com.velora.api.common.util.SlugGenerator;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -353,12 +355,24 @@ public class ProductAdminService {
         ProductTranslation ar = product.getTranslations().get("ar");
         ProductTranslation en = product.getTranslations().get("en");
 
+        List<TranslationResponse> translations = product.getTranslations().values().stream()
+                .sorted(Comparator.comparing(t -> t.getKey().getLocale()))
+                .map(t -> new TranslationResponse(
+                        t.getKey().getLocale(),
+                        t.getName(),
+                        t.getShortDescription(),
+                        t.getDescription(),
+                        t.getMetaTitle(),
+                        t.getMetaDescription()))
+                .toList();
+
         return new ProductAdminResponse(
                 product.getId(),
                 product.getSlug(),
                 product.getStatus().name(),
                 ar == null ? null : ar.getName(),
                 en == null ? null : en.getName(),
+                translations,
                 product.getCategory() == null ? null : product.getCategory().getId(),
                 product.getCategory() == null ? null : product.getCategory().nameFor("ar"),
                 product.getBrand() == null ? null : product.getBrand().getId(),
